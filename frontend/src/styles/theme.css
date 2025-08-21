@@ -1,0 +1,113 @@
+/* 森林綠主題配色變數 */
+:root {
+  /* 背景色 */
+  --bg-primary: #FFFCF5;      /* 杏仁白 - 主背景 */
+  --bg-soft: #F8F6F0;         /* 更柔和的背景 */
+  --bg-card: #FFFFFF;         /* 卡片背景 */
+  --bg-accent: #F0F9F4;       /* 淺綠背景 */
+  
+  /* 文字色 */
+  --text-primary: #312F2F;    /* 深暖灰色 - 主要文字 */
+  --text-secondary: #6B7280;  /* 次要文字 */
+  --text-muted: #9CA3AF;      /* 弱化文字 */
+  
+  /* 邊框色 */
+  --border-primary: #EAE8E1;  /* 米灰色 - 主要邊框 */
+  --border-soft: #F3F1EA;     /* 更柔和的邊框 */
+  
+  /* 綠色系統 */
+  --green-50: #F0FDF4;        /* 最淺綠 */
+  --green-100: #DCFCE7;       /* 極淺綠 */
+  --green-200: #BBF7D0;       /* 淺綠 */
+  --green-300: #86EFAC;       /* 中淺綠 */
+  --green-400: #4ADE80;       /* 中綠 */
+  --green-500: #22C55E;       /* 亮綠色 */
+  --green-600: #16A34A;       /* 森林綠 - 主色調 */
+  --green-700: #15803D;       /* 深綠 */
+  --green-800: #166534;       /* 深森林綠 */
+  --green-900: #14532D;       /* 最深綠 */
+  
+  /* 功能色 */
+  --success: #22C55E;         /* 成功綠 */
+  --error: #DC2626;           /* 錯誤紅 */
+  --warning: #F59E0B;         /* 警告黃 */
+  
+  /* 陰影 */
+  --shadow-sm: 0 1px 2px rgba(21, 128, 61, 0.05);
+  --shadow-md: 0 4px 6px rgba(21, 128, 61, 0.07);
+  --shadow-lg: 0 10px 15px rgba(21, 128, 61, 0.1);
+}
+
+/* 全域樣式調整 */
+body {
+  background-color: var(--bg-primary);
+  color: var(--text-primary);
+}
+
+/* 按鈕樣式 */
+.btn-primary {
+  background-color: var(--green-600);
+  color: white;
+  border: none;
+  border-radius: 8px;
+  padding: 8px 16px;
+  transition: all 0.2s ease;
+}
+
+.btn-primary:hover {
+  background-color: var(--green-700);
+  transform: translateY(-1px);
+}
+
+.btn-secondary {
+  background-color: var(--green-100);
+  color: var(--green-800);
+  border: 1px solid var(--green-300);
+  border-radius: 8px;
+  padding: 8px 16px;
+  transition: all 0.2s ease;
+}
+
+.btn-secondary:hover {
+  background-color: var(--green-200);
+  border-color: var(--green-400);
+}
+
+.btn-success {
+  background-color: var(--success);
+  color: white;
+}
+
+.btn-error {
+  background-color: var(--error);
+  color: white;
+}
+
+/* 卡片樣式 */
+.card {
+  background-color: var(--bg-card);
+  border: 1px solid var(--border-primary);
+  border-radius: 12px;
+  box-shadow: var(--shadow-sm);
+  transition: all 0.2s ease;
+}
+
+.card:hover {
+  box-shadow: var(--shadow-md);
+}
+
+/* 表單樣式 */
+.form-input {
+  background-color: var(--bg-soft);
+  border: 1px solid var(--border-primary);
+  color: var(--text-primary);
+  border-radius: 8px;
+  padding: 8px 12px;
+  transition: all 0.2s ease;
+}
+
+.form-input:focus {
+  outline: none;
+  border-color: var(--green-400);
+  box-shadow: 0 0 0 3px rgba(34, 197, 94, 0.1);
+}

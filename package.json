@@ -1,0 +1,29 @@
+{
+  "name": "paper-master",
+  "version": "1.0.0",
+  "description": "Interactive academic paper visualization tool similar to Connected Papers",
+  "main": "index.js",
+  "scripts": {
+    "dev": "concurrently \"npm run dev:backend\" \"npm run dev:frontend\"",
+    "dev:backend": "cd backend && npm run dev",
+    "dev:frontend": "cd frontend && npm run dev",
+    "build": "npm run build:frontend && npm run build:backend",
+    "build:frontend": "cd frontend && npm run build",
+    "build:backend": "cd backend && npm run build",
+    "start": "cd backend && npm start",
+    "install:all": "npm install && cd frontend && npm install && cd ../backend && npm install"
+  },
+  "keywords": [
+    "academic",
+    "papers",
+    "visualization",
+    "graph",
+    "research",
+    "connected-papers"
+  ],
+  "author": "Jia-Kai Dong",
+  "license": "MIT",
+  "devDependencies": {
+    "concurrently": "^8.2.2"
+  }
+}
