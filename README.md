@@ -71,6 +71,7 @@ This project requires three separate processes to run concurrently: the GROBID s
    ```
 
    Next, edit `backend/.env` to add your `OPENAI_API_KEY` or specify a local `VLLM_URL`.
+   (Currently, only local VLLM is supported, and the OpenAI API requires fixing.)
 
    Finally, run the development script from the root directory. This will start both the backend and frontend servers concurrently.
 
