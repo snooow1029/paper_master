@@ -17,7 +17,7 @@ Paper Master is designed to help researchers visualize and understand the relati
 
 ## Demo
 
-<video src="Demo.mp4" width="600" controls></video>
+[![Watch Demo](https://img.youtube.com/vi/kAYbg1XUcUw/maxresdefault.jpg)](https://youtu.be/kAYbg1XUcUw)
 
 ## Quick Start
 
