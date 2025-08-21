@@ -16,7 +16,8 @@ Paper Master is designed to help researchers visualize and understand the relati
 
 ## Demo
 
-https://github.com/user-attachments/assets/d33178c3-b761-4d83-901e-2162451e1d03
+<video src="Demo.mp4" width="600" controls></video>
+
 
 ## Quick Start
 
