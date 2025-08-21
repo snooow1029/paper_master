@@ -31,56 +31,61 @@ This project uses a monorepo-like structure with a root `package.json` to manage
 
 ### Installation
 
-1.  **Clone the repository:**
-    ```bash
-    git clone <repository-url>
-    cd paper-master
-    ```
+1. **Clone the repository:**
 
-2.  **Install all dependencies:**
-    This command will install dependencies for the root, frontend, and backend packages.
-    ```bash
-    npm run install:all
-    ```
+   ```bash
+   git clone https://github.com/snooow1029/paper_master.git
+   cd paper-master
+   ```
+2. **Install all dependencies:**
+   This command will install dependencies for the root, frontend, and backend packages.
+
+   ```bash
+   npm run install:all
+   ```
 
 ### Running the Development Servers
 
 This project requires three separate processes to run concurrently: the GROBID server, the backend API, and the frontend web app.
 
-1.  **Start GROBID (Terminal 1)**
+1. **Start GROBID (Terminal 1)**
 
-    GROBID is used to extract structured metadata from PDFs. See the [GROBID documentation](https://grobid.readthedocs.io/en/latest/Introduction/) for more details.
+   GROBID is used to extract structured metadata from PDFs. See the [GROBID documentation](https://grobid.readthedocs.io/en/latest/Introduction/) for more details.
 
-    ```bash
-    # Download and run GROBID (only needs to be done once)
-    wget https://github.com/kermitt2/grobid/archive/0.8.2.zip
-    unzip 0.8.2.zip
-    cd grobid-0.8.2
-    ./gradlew run
-    ```
-    By default, GROBID listens on `http://localhost:8070`.
+   ```bash
+   # Download and run GROBID (only needs to be done once)
+   wget https://github.com/kermitt2/grobid/archive/0.8.2.zip
+   unzip 0.8.2.zip
+   cd grobid-0.8.2
+   ./gradlew run
+   ```
 
-2.  **Configure and Start the Backend & Frontend (Terminal 2)**
+   By default, GROBID listens on `http://localhost:8070`.
+2. **Configure and Start the Backend & Frontend (Terminal 2)**
 
-    First, set up your environment variables by copying the example file:
-    ```bash
-    cp backend/.env.example backend/.env
-    ```
-    Next, edit `backend/.env` to add your `OPENAI_API_KEY` or specify a local `VLLM_URL`.
+   First, set up your environment variables by copying the example file:
 
-    Finally, run the development script from the root directory. This will start both the backend and frontend servers concurrently.
-    ```bash
-    npm run dev
-    ```
-    - The **backend** will run on the port specified in `.env` (default: `5000`).
-    - The **frontend** will run on `http://localhost:3000`.
+   ```bash
+   cp backend/.env.example backend/.env
+   ```
+
+   Next, edit `backend/.env` to add your `OPENAI_API_KEY` or specify a local `VLLM_URL`.
+
+   Finally, run the development script from the root directory. This will start both the backend and frontend servers concurrently.
+
+   ```bash
+   npm run dev
+   ```
+
+   - The **backend** will run on the port specified in `.env` (default: `5000`).
+   - The **frontend** will run on `http://localhost:3000`.
 
 ### Quick Verification
 
-1.  Ensure GROBID is running.
-2.  Run `npm run dev` from the root directory.
-3.  Open your browser to `http://localhost:3000`.
-4.  Submit an arXiv URL and confirm that the analysis pipeline completes successfully.
+1. Ensure GROBID is running.
+2. Run `npm run dev` from the root directory.
+3. Open your browser to `http://localhost:3000`.
+4. Submit an arXiv URL and confirm that the analysis pipeline completes successfully.
 
 ## Current Status (v0.1 — Functional Prototype)
 
