@@ -58,6 +58,7 @@ This project requires three separate processes to run concurrently: the GROBID s
    wget https://github.com/kermitt2/grobid/archive/0.8.2.zip
    unzip 0.8.2.zip
    cd grobid-0.8.2
+   chmod +x gradlew
    ./gradlew run
    ```
 
