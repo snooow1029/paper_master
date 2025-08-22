@@ -36,7 +36,7 @@ This project uses a monorepo-like structure with a root `package.json` to manage
 
    ```bash
    git clone https://github.com/snooow1029/paper_master.git
-   cd paper-master
+   cd paper_master
    ```
 2. **Install all dependencies:**
    This command will install dependencies for the root, frontend, and backend packages.
