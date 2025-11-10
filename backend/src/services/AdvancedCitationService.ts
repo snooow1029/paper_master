@@ -56,19 +56,63 @@ export class AdvancedCitationService {
   }
 
   /**
+   * Normalize arXiv URL to PDF URL format
+   * Supports: /abs/, /pdf/, /html/ formats
+   */
+  private normalizeArxivUrlToPdf(url: string): string {
+    // Extract arXiv ID from various formats
+    let arxivId: string | null = null;
+    
+    // Format 1: https://arxiv.org/abs/2411.00154v1
+    const absMatch = url.match(/arxiv\.org\/abs\/([^?\/\s]+)/i);
+    if (absMatch) {
+      arxivId = absMatch[1];
+    }
+    
+    // Format 2: https://arxiv.org/pdf/2411.00154v1.pdf
+    if (!arxivId) {
+      const pdfMatch = url.match(/arxiv\.org\/pdf\/([^?\/\s]+)(?:\.pdf)?/i);
+      if (pdfMatch) {
+        arxivId = pdfMatch[1];
+      }
+    }
+    
+    // Format 3: https://arxiv.org/html/2411.00154v1
+    if (!arxivId) {
+      const htmlMatch = url.match(/arxiv\.org\/html\/([^?\/\s]+)/i);
+      if (htmlMatch) {
+        arxivId = htmlMatch[1];
+      }
+    }
+    
+    // Format 4: Direct arXiv ID (e.g., 2411.00154v1)
+    if (!arxivId) {
+      const idMatch = url.match(/^([0-9]{4}\.[0-9]{4,5}(?:v[0-9]+)?)/);
+      if (idMatch) {
+        arxivId = idMatch[1];
+      }
+    }
+    
+    if (!arxivId) {
+      throw new Error(`Unable to extract arXiv ID from URL: ${url}`);
+    }
+    
+    // Return normalized PDF URL
+    return `https://arxiv.org/pdf/${arxivId}.pdf`;
+  }
+
+  /**
    * Test downloading PDF from arXiv URL
+   * Now supports: /abs/, /pdf/, /html/ formats
    */
   async testPdfDownload(arxivUrl: string): Promise<Buffer | null> {
     try {
       console.log(`Testing PDF download from: ${arxivUrl}`);
       
-      // Convert arXiv abs URL to PDF URL if needed
-      let pdfUrl = arxivUrl;
-      if (arxivUrl.includes('arxiv.org/abs/')) {
-        pdfUrl = arxivUrl.replace('/abs/', '/pdf/') + '.pdf';
-      }
+      // Normalize URL to PDF format (supports abs, pdf, html)
+      const pdfUrl = this.normalizeArxivUrlToPdf(arxivUrl);
       
-      console.log(`PDF URL: ${pdfUrl}`);
+      console.log(`Normalized PDF URL: ${pdfUrl}`);
       
       const response = await axios.get(pdfUrl, {
         responseType: 'arraybuffer',

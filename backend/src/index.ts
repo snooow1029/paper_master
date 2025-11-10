@@ -12,6 +12,7 @@ import testRoutes from './routes/testRoutes';
 import grobidTestRoutes from './routes/grobidTestRoutes';
 import graphRoutes from './routes/graphRoutes';
 import enhancedGraphRoutes from './routes/enhancedGraphRoutes';
+import referenceGraphRoutes from './routes/referenceGraphRoutes';
 import { errorHandler } from './middleware/errorHandler';
 
 const app = express();
@@ -35,6 +36,7 @@ app.use('/api/test', testRoutes);
 app.use('/api/grobid', grobidTestRoutes);
 app.use('/api/graph', graphRoutes);
 app.use('/api/enhanced-graph', enhancedGraphRoutes);
+app.use('/api/reference-graph', referenceGraphRoutes);
 
 // Health check
 app.get('/api/health', (req, res) => {
