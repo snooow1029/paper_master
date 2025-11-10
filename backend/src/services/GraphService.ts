@@ -1,4 +1,4 @@
-import OpenAI from 'openai';
+import { GoogleGenerativeAI } from '@google/generative-ai';
 import axios from 'axios';
 import { Paper } from '../entities/Paper';
 import { PaperRelation } from '../entities/PaperRelation';
@@ -30,31 +30,33 @@ interface GraphData {
 }
 
 export class GraphService {
-  private openai: OpenAI | null;
+  private genAI: GoogleGenerativeAI | null;
   private llmType: string;
   private localLlmUrl: string;
   private localLlmModel: string;
+  private geminiModel: string;
   private relationRepository = AppDataSource.getRepository(PaperRelation);
 
   constructor() {
     this.llmType = process.env.LLM_TYPE || 'disabled';
     this.localLlmUrl = process.env.LOCAL_LLM_URL || 'http://localhost:8000';
     this.localLlmModel = process.env.LOCAL_LLM_MODEL || 'meta-llama/Llama-2-7b-chat-hf';
+    this.geminiModel = process.env.GEMINI_MODEL || 'gemini-pro';
     
-    if (this.llmType === 'openai') {
-      const apiKey = process.env.OPENAI_API_KEY;
-      if (apiKey && apiKey !== 'your_openai_api_key_here') {
-        this.openai = new OpenAI({ apiKey });
-        console.log('Using OpenAI API for relationship analysis');
+    if (this.llmType === 'gemini' || this.llmType === 'openai') {
+      const apiKey = process.env.GEMINI_API_KEY || process.env.OPENAI_API_KEY;
+      if (apiKey && apiKey !== 'your_gemini_api_key_here' && apiKey !== 'your_openai_api_key_here') {
+        this.genAI = new GoogleGenerativeAI(apiKey);
+        console.log(`Using Google Gemini API (${this.geminiModel}) for relationship analysis`);
       } else {
-        this.openai = null;
-        console.warn('OpenAI API key not configured. Falling back to basic analysis.');
+        this.genAI = null;
+        console.warn('Gemini API key not configured. Falling back to basic analysis.');
       }
     } else if (this.llmType === 'local') {
-      this.openai = null;
+      this.genAI = null;
       console.log(`Using local LLM at ${this.localLlmUrl} with model ${this.localLlmModel}`);
     } else {
-      this.openai = null;
+      this.genAI = null;
       console.log('LLM disabled. Using basic keyword-based analysis.');
     }
   }
@@ -85,8 +87,8 @@ export class GraphService {
 
   private async analyzeRelationship(paperA: Paper, paperB: Paper): Promise<Partial<PaperRelation> | null> {
     try {
-      if (this.llmType === 'openai' && this.openai) {
-        return await this.analyzeWithOpenAI(paperA, paperB);
+      if ((this.llmType === 'gemini' || this.llmType === 'openai') && this.genAI) {
+        return await this.analyzeWithGemini(paperA, paperB);
       } else if (this.llmType === 'local') {
         return await this.analyzeWithLocalLLM(paperA, paperB);
       } else {
@@ -99,17 +101,21 @@ export class GraphService {
     }
   }
 
-  private async analyzeWithOpenAI(paperA: Paper, paperB: Paper): Promise<Partial<PaperRelation> | null> {
+  private async analyzeWithGemini(paperA: Paper, paperB: Paper): Promise<Partial<PaperRelation> | null> {
     const prompt = this.createAnalysisPrompt(paperA, paperB);
 
-    const response = await this.openai!.chat.completions.create({
-      model: 'gpt-3.5-turbo',
-      messages: [{ role: 'user', content: prompt }],
-      temperature: 0.3,
-      max_tokens: 500,
+    const model = this.genAI!.getGenerativeModel({ 
+      model: this.geminiModel,
+      generationConfig: {
+        temperature: 0.3,
+        maxOutputTokens: 500,
+      },
     });
-
-    const content = response.choices[0]?.message?.content;
+    
+    const result = await model.generateContent(prompt);
+    const response = await result.response;
+    const content = response.text();
+    
     if (!content) {
       return null;
     }

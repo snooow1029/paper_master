@@ -3,7 +3,9 @@
  * 使用 LLM 分析論文之間的承接關係
  */
 
+import { GoogleGenerativeAI } from '@google/generative-ai';
 import axios from 'axios';
+import { SmartFilterService } from './SmartFilterService';
 
 export interface PaperMetadata {
   id: string;
@@ -50,12 +52,39 @@ export interface PaperGraph {
 }
 
 export class PaperRelationshipAnalyzer {
+  private genAI: GoogleGenerativeAI | null;
+  private llmType: string;
   private llmUrl: string;
   private llmModel: string;
+  private geminiModel: string;
+  private smartFilter: SmartFilterService;
+  private useSmartFilter: boolean;
 
   constructor() {
+    this.llmType = process.env.LLM_TYPE || 'gemini';
     this.llmUrl = process.env.LOCAL_LLM_URL || 'http://localhost:8000';
     this.llmModel = process.env.LOCAL_LLM_MODEL || 'Qwen/Qwen3-4B-Instruct-2507';
+    this.geminiModel = process.env.GEMINI_MODEL || 'gemini-pro';
+    this.smartFilter = new SmartFilterService();
+    this.useSmartFilter = process.env.USE_SMART_FILTER !== 'false'; // 默认启用
+    
+    if (this.llmType === 'gemini' || this.llmType === 'openai') {
+      const apiKey = process.env.GEMINI_API_KEY || process.env.OPENAI_API_KEY;
+      if (apiKey && apiKey !== 'your_gemini_api_key_here' && apiKey !== 'your_openai_api_key_here') {
+        this.genAI = new GoogleGenerativeAI(apiKey);
+        console.log(`Using Google Gemini API (${this.geminiModel}) for relationship analysis`);
+      } else {
+        this.genAI = null;
+        console.warn('Gemini API key not configured. Falling back to local LLM.');
+      }
+    } else {
+      this.genAI = null;
+      console.log(`Using local LLM at ${this.llmUrl} with model ${this.llmModel}`);
+    }
+    
+    if (this.useSmartFilter) {
+      console.log('✅ Smart Filter enabled - will pre-filter paper pairs before LLM analysis');
+    }
   }
 
   // 取得論文縮寫（如SRSA、GPT-4），優先用label，否則取標題首字母
@@ -72,21 +101,28 @@ export class PaperRelationshipAnalyzer {
    */
   async testLLMConnection(): Promise<boolean> {
     try {
-      const response = await axios.post(`${this.llmUrl}/v1/chat/completions`, {
-        model: this.llmModel,
-        messages: [
-          {
-            role: 'user',
-            content: 'Hello, are you working correctly?'
-          }
-        ],
-        max_tokens: 50,
-        temperature: 0.3
-      }, {
-        timeout: 10000
-      });
+      if ((this.llmType === 'gemini' || this.llmType === 'openai') && this.genAI) {
+        const model = this.genAI.getGenerativeModel({ model: this.geminiModel });
+        const result = await model.generateContent('Hello, are you working correctly?');
+        const response = await result.response;
+        return !!response.text();
+      } else {
+        const response = await axios.post(`${this.llmUrl}/v1/chat/completions`, {
+          model: this.llmModel,
+          messages: [
+            {
+              role: 'user',
+              content: 'Hello, are you working correctly?'
+            }
+          ],
+          max_tokens: 50,
+          temperature: 0.3
+        }, {
+          timeout: 10000
+        });
 
-      return response.status === 200 && response.data?.choices?.length > 0;
+        return response.status === 200 && response.data?.choices?.length > 0;
+      }
     } catch (error) {
       console.error('LLM connection test failed:', error);
       return false;
@@ -102,20 +138,57 @@ export class PaperRelationshipAnalyzer {
   ): Promise<any> {
     for (let attempt = 1; attempt <= maxRetries + 1; attempt++) {
       try {
-        const response = await axios.post(`${this.llmUrl}/v1/chat/completions`, {
-          model: this.llmModel,
-          messages,
-          max_tokens: 1000,
-          temperature: 0.3
-        }, {
-          timeout: 30000 // 30秒超時
-        });
+        if ((this.llmType === 'gemini' || this.llmType === 'openai') && this.genAI) {
+          // 使用 Gemini API
+          const model = this.genAI.getGenerativeModel({ 
+            model: this.geminiModel,
+            generationConfig: {
+              temperature: 0.3,
+              maxOutputTokens: 1000,
+            },
+          });
+          
+          // 将 messages 转换为 prompt
+          const systemMessage = messages.find(m => m.role === 'system');
+          const userMessages = messages.filter(m => m.role === 'user');
+          let prompt = '';
+          if (systemMessage) {
+            prompt = `${systemMessage.content}\n\n${userMessages.map(m => m.content).join('\n\n')}`;
+          } else {
+            prompt = userMessages.map(m => m.content).join('\n\n');
+          }
+          
+          const result = await model.generateContent(prompt);
+          const response = await result.response;
+          const content = response.text();
+          
+          // 返回兼容格式
+          return {
+            data: {
+              choices: [{
+                message: {
+                  content: content
+                }
+              }]
+            }
+          };
+        } else {
+          // 使用本地 LLM
+          const response = await axios.post(`${this.llmUrl}/v1/chat/completions`, {
+            model: this.llmModel,
+            messages,
+            max_tokens: 1000,
+            temperature: 0.3
+          }, {
+            timeout: 30000 // 30秒超時
+          });
 
-        if (response.status === 200 && response.data?.choices?.length > 0) {
-          return response;
+          if (response.status === 200 && response.data?.choices?.length > 0) {
+            return response;
+          }
+          
+          throw new Error(`LLM returned invalid response: ${response.status}`);
         }
-        
-        throw new Error(`LLM returned invalid response: ${response.status}`);
       } catch (error) {
         console.warn(`LLM call attempt ${attempt}/${maxRetries + 1} failed:`, error instanceof Error ? error.message : error);
         
@@ -238,21 +311,36 @@ export class PaperRelationshipAnalyzer {
       }))
     );
 
-    // 生成所有需要分析的論文對
-    const paperPairs: Array<{source: PaperMetadata, target: PaperMetadata, index: number}> = [];
-    let pairIndex = 0;
-    for (let i = 0; i < papers.length; i++) {
-      for (let j = 0; j < papers.length; j++) {
-        if (i === j) continue;
-        paperPairs.push({
-          source: papers[i], 
-          target: papers[j],
-          index: pairIndex++
-        });
+    // 使用智能过滤筛选论文对
+    let paperPairs: Array<{source: PaperMetadata, target: PaperMetadata, index: number, confidence?: number}> = [];
+    
+    if (this.useSmartFilter) {
+      console.log(`\n🔍 Applying Smart Filter to ${papers.length} papers...`);
+      const filteredPairs = this.smartFilter.filterPaperPairs(papers);
+      
+      paperPairs = filteredPairs.map((pair, idx) => ({
+        source: pair.source,
+        target: pair.target,
+        index: idx,
+        confidence: pair.confidence
+      }));
+      
+      console.log(`✅ Smart Filter selected ${paperPairs.length} pairs for LLM analysis`);
+    } else {
+      // 传统方式：生成所有论文对
+      let pairIndex = 0;
+      for (let i = 0; i < papers.length; i++) {
+        for (let j = 0; j < papers.length; j++) {
+          if (i === j) continue;
+          paperPairs.push({
+            source: papers[i], 
+            target: papers[j],
+            index: pairIndex++
+          });
+        }
       }
+      console.log(`Total pairs to analyze: ${paperPairs.length}`);
     }
-
-    console.log(`Total pairs to analyze: ${paperPairs.length}`);
 
     // 使用並行處理，但限制併發數量以避免 LLM 服務器過載
     const maxConcurrency = process.env.LLM_MAX_CONCURRENCY ? 
@@ -502,18 +590,50 @@ Please respond in JSON format:
   }
 
   /**
-   * 檢查兩個標題是否相似（簡單的相似度檢查）
+   * 檢查兩個標題是否相似（改進的相似度檢查）
    */
   private isSimilarTitle(title1: string, title2: string): boolean {
-    const normalize = (s: string) => s.toLowerCase().replace(/[^\w\s]/g, '').trim();
+    if (!title1 || !title2) return false;
+    
+    const normalize = (s: string) => s.toLowerCase()
+      .replace(/[^\w\s]/g, ' ')
+      .replace(/\s+/g, ' ')
+      .trim();
+    
     const t1 = normalize(title1);
     const t2 = normalize(title2);
     
-    // 簡單的包含檢查和編輯距離
-    if (t1.includes(t2) || t2.includes(t1)) return true;
+    // 完全匹配
+    if (t1 === t2) return true;
     
+    // 包含檢查（考慮縮寫情況）
+    if (t1.includes(t2) || t2.includes(t1)) {
+      const shorter = Math.min(t1.length, t2.length);
+      const longer = Math.max(t1.length, t2.length);
+      // 如果較短的標題至少是較長標題的 60%，認為是匹配
+      if (shorter / longer >= 0.6) return true;
+    }
+    
+    // 單詞級別匹配（改進）
+    const words1 = t1.split(' ').filter(w => w.length > 2);
+    const words2 = t2.split(' ').filter(w => w.length > 2);
+    
+    if (words1.length === 0 || words2.length === 0) {
+      // 如果單詞提取失敗，使用編輯距離
+      const similarity = this.calculateSimilarity(t1, t2);
+      return similarity > 0.75; // 降低閾值以提高召回率
+    }
+    
+    // 計算共同單詞比例
+    const commonWords = words1.filter(w => words2.includes(w));
+    const wordSimilarity = commonWords.length / Math.min(words1.length, words2.length);
+    
+    // 如果單詞相似度 > 0.5，認為是匹配
+    if (wordSimilarity > 0.5) return true;
+    
+    // 最後使用編輯距離作為備選
     const similarity = this.calculateSimilarity(t1, t2);
-    return similarity > 0.8;
+    return similarity > 0.75; // 降低閾值以提高召回率
   }
 
   /**

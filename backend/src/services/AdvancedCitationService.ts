@@ -783,50 +783,147 @@ export class AdvancedCitationService {
       
       console.log(`All sections found: ${allSections.join(', ')}`);
 
-      // Define target sections (case-insensitive patterns)
+      // Define target sections (case-insensitive patterns) - 扩展匹配模式
       const targetSectionPatterns = [
+        // Introduction 相关变体
         /^introduction$/i,
-        /^related\s+work$/i,
+        /^introduction\s+and\s+motivation$/i,
+        /^introduction\s+and\s+overview$/i,
+        /^introduction\s+and\s+background$/i,
+        /^overview$/i,
+        /^motivation$/i,
+        /^motivation\s+and\s+introduction$/i,
         /^background$/i,
+        /^background\s+and\s+motivation$/i,
+        
+        // Related Work 相关变体
+        /^related\s+work$/i,
+        /^related\s+works$/i,
         /^literature\s+review$/i,
+        /^literature\s+reviews$/i,
+        /^literature$/i,
         /^previous\s+work$/i,
+        /^previous\s+works$/i,
         /^prior\s+work$/i,
-        /^motivation$/i
+        /^prior\s+works$/i,
+        /^related\s+research$/i,
+        /^related\s+studies$/i,
+        /^state\s+of\s+the\s+art$/i,
+        /^state-of-the-art$/i,
+        /^sota$/i,
+        /^existing\s+work$/i,
+        /^existing\s+works$/i,
+        /^related\s+work\s+and\s+background$/i,
+        /^background\s+and\s+related\s+work$/i,
+        /^related\s+work\s+and\s+motivation$/i,
+        /^related\s+work\s+and\s+literature\s+review$/i,
+        /^literature\s+review\s+and\s+related\s+work$/i,
+        /^survey$/i,
+        /^survey\s+of\s+related\s+work$/i,
+        /^review\s+of\s+related\s+work$/i,
+        /^review$/i,
+        
+        // 其他可能包含引用的章节
+        /^discussion\s+of\s+related\s+work$/i,
+        /^comparison\s+with\s+related\s+work$/i,
+        /^comparison$/i,
+        /^related\s+approaches$/i,
+        /^alternative\s+approaches$/i,
+        /^other\s+approaches$/i,
+        /^related\s+methods$/i,
+        /^related\s+techniques$/i
       ];
 
+      // 改进的匹配函数：支持部分匹配和模糊匹配
+      const matchSection = (sectionTitle: string): boolean => {
+        const normalizedTitle = sectionTitle.trim().toLowerCase();
+        
+        // 1. 精确模式匹配
+        if (targetSectionPatterns.some(pattern => pattern.test(sectionTitle))) {
+          return true;
+        }
+        
+        // 2. 部分匹配：检查标题是否包含关键词
+        const keywords = [
+          'introduction', 'related work', 'related works', 'literature review',
+          'background', 'previous work', 'prior work', 'motivation',
+          'overview', 'survey', 'review', 'state of the art', 'sota'
+        ];
+        
+        for (const keyword of keywords) {
+          if (normalizedTitle.includes(keyword.toLowerCase())) {
+            // 确保不是其他章节（如 "Conclusion" 包含 "introduction" 的情况）
+            const keywordIndex = normalizedTitle.indexOf(keyword.toLowerCase());
+            const beforeKeyword = normalizedTitle.substring(0, keywordIndex);
+            const afterKeyword = normalizedTitle.substring(keywordIndex + keyword.length);
+            
+            // 检查关键词前后是否有其他主要章节词（避免误匹配）
+            const conflictingKeywords = ['conclusion', 'discussion', 'methodology', 'method', 'experiment', 'result'];
+            const hasConflict = conflictingKeywords.some(conflict => 
+              beforeKeyword.includes(conflict) || afterKeyword.includes(conflict)
+            );
+            
+            if (!hasConflict) {
+              return true;
+            }
+          }
+        }
+        
+        return false;
+      };
+      
       // Find sections that match our patterns - try multiple selectors
       let targetSectionHeads = $('div[type="section"] head').filter((_, el) => {
         const sectionTitle = $(el).text().trim();
-        return targetSectionPatterns.some(pattern => pattern.test(sectionTitle));
+        return matchSection(sectionTitle);
       });
       
       // If no target sections found with first selector, try alternatives
       if (targetSectionHeads.length === 0) {
         targetSectionHeads = $('div head').filter((_, el) => {
           const sectionTitle = $(el).text().trim();
-          return targetSectionPatterns.some(pattern => pattern.test(sectionTitle));
+          return matchSection(sectionTitle);
         });
       }
       
       if (targetSectionHeads.length === 0) {
         targetSectionHeads = $('head').filter((_, el) => {
           const sectionTitle = $(el).text().trim();
-          return targetSectionPatterns.some(pattern => pattern.test(sectionTitle));
+          return matchSection(sectionTitle);
         });
+      }
+      
+      // 如果还是没找到，尝试更宽松的匹配：查找包含关键词的段落标题
+      if (targetSectionHeads.length === 0) {
+        console.log('🔍 Trying relaxed matching for section titles...');
+        const allHeads = $('head').map((_, el) => {
+          const title = $(el).text().trim();
+          return { element: el, title };
+        }).get();
+        
+        for (const { element, title } of allHeads) {
+          if (matchSection(title)) {
+            targetSectionHeads = targetSectionHeads.add(element);
+          }
+        }
       }
 
       const filteredSections = targetSectionHeads.map((_, el) => $(el).text().trim()).get();
-      console.log(`Target sections found: ${filteredSections.join(', ')}`);
-
+      
       // If no target sections found, fall back to extracting from all content
       if (filteredSections.length === 0) {
-        console.log('⚠️  No target sections found, falling back to extract all citations');
+        console.log('⚠️  No target sections found (Introduction/Related Work), falling back to extract all citations');
         console.log('🔍 Will analyze first few sections or entire document for citations');
         
         // Try to use first few sections as fallback
         if (allSections.length > 0) {
-          console.log(`📝 Available sections for fallback: ${allSections.slice(0, 5).join(', ')}`);
+          console.log(`📝 Available sections in document: ${allSections.slice(0, 10).join(', ')}`);
+          console.log(`💡 Tip: If you see sections like "Introduction" or "Related Work" above, they may have different naming in this paper`);
+        } else {
+          console.log(`⚠️  No sections detected in document structure`);
         }
+      } else {
+        console.log(`✅ Target sections found (${filteredSections.length}): ${filteredSections.join(', ')}`);
       }
 
       // Extract bibliography entries first
@@ -893,14 +990,41 @@ export class AdvancedCitationService {
           const altRefs2 = $section.find('[target^="#"]');
           console.log(`📊 Alternative counts: ref=${altRefs1.length}, target=#=${altRefs2.length}`);
 
-          // Find all citation references in this section
-          $section.find('ref[type="bibr"]').each((_, ref) => {
+          // Find all citation references in this section - 改进匹配逻辑
+          // 尝试多种选择器以捕获所有引用
+          const citationSelectors = [
+            'ref[type="bibr"]',
+            'ref[target^="#"]',
+            'ref'
+          ];
+          
+          let foundRefs = $section.find(citationSelectors[0]);
+          if (foundRefs.length === 0) {
+            foundRefs = $section.find(citationSelectors[1]);
+          }
+          if (foundRefs.length === 0) {
+            foundRefs = $section.find(citationSelectors[2]);
+          }
+          
+          foundRefs.each((_, ref) => {
             const $ref = $(ref);
             const target = $ref.attr('target');
             
             if (target && target.startsWith('#')) {
               const bibId = target.substring(1);
-              const bibInfo = bibliographyMap.get(bibId);
+              let bibInfo = bibliographyMap.get(bibId);
+              
+              // 如果直接匹配失败，尝试模糊匹配
+              if (!bibInfo) {
+                // 尝试匹配部分 ID（有些 GROBID 输出可能 ID 不完整）
+                for (const [id, info] of bibliographyMap.entries()) {
+                  if (id.includes(bibId) || bibId.includes(id)) {
+                    bibInfo = info;
+                    console.log(`⚠️  Using fuzzy match: ${bibId} -> ${id}`);
+                    break;
+                  }
+                }
+              }
               
               if (bibInfo) {
                 // Get surrounding context with improved sentence boundary detection
@@ -1061,20 +1185,45 @@ export class AdvancedCitationService {
           
           if (target && target.startsWith('#')) {
             const bibId = target.substring(1);
-            const bibInfo = bibliographyMap.get(bibId);
+            let bibInfo = bibliographyMap.get(bibId);
+            
+            // 如果直接匹配失败，尝试模糊匹配
+            if (!bibInfo) {
+              for (const [id, info] of bibliographyMap.entries()) {
+                if (id.includes(bibId) || bibId.includes(id)) {
+                  bibInfo = info;
+                  console.log(`⚠️  Fallback: Using fuzzy match: ${bibId} -> ${id}`);
+                  break;
+                }
+              }
+            }
             
             if (bibInfo) {
               // Get surrounding context from the entire document
               const $parent = $ref.closest('p, div');
-              const context = $parent.text().trim();
+              let context = $parent.text().trim();
+              
+              // 改进 context 提取：尝试获取更完整的句子
+              if (context.length > 500) {
+                const refText = $ref.text();
+                const refIndex = context.indexOf(refText);
+                if (refIndex !== -1) {
+                  const contextRadius = 200;
+                  const beforeStart = Math.max(0, refIndex - contextRadius);
+                  const afterEnd = Math.min(context.length, refIndex + refText.length + contextRadius);
+                  context = context.substring(beforeStart, afterEnd);
+                }
+              }
               
               citations.push({
                 ...bibInfo,
-                context: context.substring(0, 300), // Limit context length
+                context: context.substring(0, 500), // 增加 context 长度限制
                 contextBefore: '',
                 contextAfter: '',
                 section: 'Unknown'
               });
+            } else {
+              console.log(`⚠️  No bibliography info found for citation target: ${target}`);
             }
           }
         });

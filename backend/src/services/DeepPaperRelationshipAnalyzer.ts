@@ -9,6 +9,7 @@
  * 4. 關係證據強度評估
  */
 
+import { GoogleGenerativeAI } from '@google/generative-ai';
 import axios from 'axios';
 import * as cheerio from 'cheerio';
 import { PaperMetadata, RelationshipEdge } from './PaperRelationshipAnalyzer';
@@ -94,12 +95,31 @@ export interface DeepRelationshipEdge extends RelationshipEdge {
 }
 
 export class DeepPaperRelationshipAnalyzer {
+  private genAI: GoogleGenerativeAI | null;
+  private llmType: string;
   private llmUrl: string;
   private llmModel: string;
+  private geminiModel: string;
 
   constructor() {
+    this.llmType = process.env.LLM_TYPE || 'gemini';
     this.llmUrl = process.env.LOCAL_LLM_URL || 'http://localhost:8000';
     this.llmModel = process.env.LOCAL_LLM_MODEL || 'Qwen/Qwen3-4B-Instruct-2507';
+    this.geminiModel = process.env.GEMINI_MODEL || 'gemini-pro';
+    
+    if (this.llmType === 'gemini' || this.llmType === 'openai') {
+      const apiKey = process.env.GEMINI_API_KEY || process.env.OPENAI_API_KEY;
+      if (apiKey && apiKey !== 'your_gemini_api_key_here' && apiKey !== 'your_openai_api_key_here') {
+        this.genAI = new GoogleGenerativeAI(apiKey);
+        console.log(`Using Google Gemini API (${this.geminiModel}) for deep relationship analysis`);
+      } else {
+        this.genAI = null;
+        console.warn('Gemini API key not configured. Falling back to local LLM.');
+      }
+    } else {
+      this.genAI = null;
+      console.log(`Using local LLM at ${this.llmUrl} with model ${this.llmModel}`);
+    }
   }
 
   /**
@@ -107,21 +127,28 @@ export class DeepPaperRelationshipAnalyzer {
    */
   async testLLMConnection(): Promise<boolean> {
     try {
-      const response = await axios.post(`${this.llmUrl}/v1/chat/completions`, {
-        model: this.llmModel,
-        messages: [
-          {
-            role: 'user',
-            content: 'Hello, are you working correctly?'
-          }
-        ],
-        max_tokens: 50,
-        temperature: 0.3
-      }, {
-        timeout: 10000
-      });
+      if ((this.llmType === 'gemini' || this.llmType === 'openai') && this.genAI) {
+        const model = this.genAI.getGenerativeModel({ model: this.geminiModel });
+        const result = await model.generateContent('Hello, are you working correctly?');
+        const response = await result.response;
+        return !!response.text();
+      } else {
+        const response = await axios.post(`${this.llmUrl}/v1/chat/completions`, {
+          model: this.llmModel,
+          messages: [
+            {
+              role: 'user',
+              content: 'Hello, are you working correctly?'
+            }
+          ],
+          max_tokens: 50,
+          temperature: 0.3
+        }, {
+          timeout: 10000
+        });
 
-      return response.status === 200 && response.data?.choices?.length > 0;
+        return response.status === 200 && response.data?.choices?.length > 0;
+      }
     } catch (error) {
       console.error('LLM connection test failed:', error);
       return false;
@@ -715,20 +742,57 @@ Focus on providing accurate numerical assessments and detailed qualitative descr
   ): Promise<any> {
     for (let attempt = 1; attempt <= maxRetries + 1; attempt++) {
       try {
-        const response = await axios.post(`${this.llmUrl}/v1/chat/completions`, {
-          model: this.llmModel,
-          messages,
-          max_tokens: 2000,
-          temperature: 0.1 // 較低溫度確保一致性
-        }, {
-          timeout: 60000 // 增加超時時間
-        });
+        if ((this.llmType === 'gemini' || this.llmType === 'openai') && this.genAI) {
+          // 使用 Gemini API
+          const model = this.genAI.getGenerativeModel({ 
+            model: this.geminiModel,
+            generationConfig: {
+              temperature: 0.1, // 較低溫度確保一致性
+              maxOutputTokens: 2000,
+            },
+          });
+          
+          // 将 messages 转换为 prompt
+          const systemMessage = messages.find(m => m.role === 'system');
+          const userMessages = messages.filter(m => m.role === 'user');
+          let prompt = '';
+          if (systemMessage) {
+            prompt = `${systemMessage.content}\n\n${userMessages.map(m => m.content).join('\n\n')}`;
+          } else {
+            prompt = userMessages.map(m => m.content).join('\n\n');
+          }
+          
+          const result = await model.generateContent(prompt);
+          const response = await result.response;
+          const content = response.text();
+          
+          // 返回兼容格式
+          return {
+            data: {
+              choices: [{
+                message: {
+                  content: content
+                }
+              }]
+            }
+          };
+        } else {
+          // 使用本地 LLM
+          const response = await axios.post(`${this.llmUrl}/v1/chat/completions`, {
+            model: this.llmModel,
+            messages,
+            max_tokens: 2000,
+            temperature: 0.1 // 較低溫度確保一致性
+          }, {
+            timeout: 60000 // 增加超時時間
+          });
 
-        if (response.status === 200 && response.data?.choices?.length > 0) {
-          return response;
+          if (response.status === 200 && response.data?.choices?.length > 0) {
+            return response;
+          }
+          
+          throw new Error(`LLM returned invalid response: ${response.status}`);
         }
-        
-        throw new Error(`LLM returned invalid response: ${response.status}`);
       } catch (error) {
         console.warn(`LLM call attempt ${attempt}/${maxRetries + 1} failed:`, error instanceof Error ? error.message : error);
         

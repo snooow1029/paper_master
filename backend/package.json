@@ -20,7 +20,7 @@
     "typeorm": "^0.3.17",
     "reflect-metadata": "^0.1.13",
     "node-cron": "^3.0.2",
-    "openai": "^4.10.0"
+    "@google/generative-ai": "^0.21.0"
   },
   "devDependencies": {
     "@types/express": "^4.17.17",
