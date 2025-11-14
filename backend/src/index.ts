@@ -16,7 +16,7 @@ import referenceGraphRoutes from './routes/referenceGraphRoutes';
 import { errorHandler } from './middleware/errorHandler';
 
 const app = express();
-const PORT = process.env.PORT || 5001;
+const PORT = process.env.PORT || 8080;
 
 // 在啟動時顯示 LLM 配置
 const llmType = process.env.LLM_TYPE || 'disabled';
