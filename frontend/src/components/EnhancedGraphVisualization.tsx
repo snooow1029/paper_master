@@ -6,6 +6,8 @@
 import React, { useState } from 'react';
 import axios from 'axios';
 
+const API_BASE_URL = import.meta.env.VITE_API_BASE_URL || '';
+
 interface DeepRelationshipEdge {
   source: string;
   target: string;
@@ -130,7 +132,7 @@ const EnhancedGraphVisualization: React.FC = () => {
     setGraph(null);
 
     try {
-      const response = await axios.post('http://localhost:5001/api/enhanced-graph/build', {
+      const response = await axios.post(`${API_BASE_URL}/api/enhanced-graph/build`, {
         papers: validUrls
       });
 
@@ -162,7 +164,7 @@ const EnhancedGraphVisualization: React.FC = () => {
   // 檢查系統狀態
   const checkSystemStatus = async () => {
     try {
-      const response = await axios.get('http://localhost:5001/api/enhanced-graph/status');
+      const response = await axios.get(`${API_BASE_URL}/api/enhanced-graph/status`);
       setSystemStatus(response.data);
     } catch (err) {
       console.error('Failed to check system status:', err);

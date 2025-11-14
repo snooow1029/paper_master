@@ -3,6 +3,8 @@ import GraphVisualization from '../components/GraphVisualization';
 import { GraphData } from '../types/graph';
 import '../styles/theme.css';
 
+const API_BASE_URL = import.meta.env.VITE_API_BASE_URL || '';
+
 interface Citation {
   title: string;
   authors?: string[];
@@ -76,7 +78,7 @@ const PaperGraphPage: React.FC = () => {
       
       for (const url of urls) {
         try {
-          const response = await fetch('http://localhost:5001/api/enhanced-graph/build', {
+          const response = await fetch(`${API_BASE_URL}/api/enhanced-graph/build`, {
             method: 'POST',
             headers: {
               'Content-Type': 'application/json',
@@ -124,6 +126,8 @@ const PaperGraphPage: React.FC = () => {
       return graphData; // 返回原始數據作為fallback
     }
   };
+
+  void enhanceWithCitationCounts;
 
   // Main analysis function
   const handleAnalyze = async () => {
