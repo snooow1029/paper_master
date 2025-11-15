@@ -142,7 +142,7 @@ const PaperGraphPage: React.FC = () => {
 
     try {
       // 使用原本的圖分析API
-      const response = await fetch('/api/graph/build-graph', {
+      const response = await fetch(`${API_BASE_URL}/api/graph/build-graph`, {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',
@@ -191,7 +191,7 @@ const PaperGraphPage: React.FC = () => {
 
     setIsExtracting(true);
     try {
-      const response = await fetch('/api/grobid/extract-citations', {
+      const response = await fetch(`${API_BASE_URL}/api/grobid/extract-citations`, {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',

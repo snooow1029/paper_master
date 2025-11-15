@@ -1,6 +1,8 @@
 import { useState } from 'react';
 import '../styles/theme.css';
 
+const API_BASE_URL = import.meta.env.VITE_API_BASE_URL || '';
+
 interface Citation {
   id: string;
   title?: string;
@@ -34,7 +36,7 @@ export default function CitationExtractor() {
     setResult(null);
 
     try {
-      const response = await fetch('/api/grobid/extract-citations', {
+      const response = await fetch(`${API_BASE_URL}/api/grobid/extract-citations`, {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',
