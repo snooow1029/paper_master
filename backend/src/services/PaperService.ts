@@ -38,6 +38,14 @@ export class PaperService {
     return papers;
   }
 
+  /**
+   * Fetch a single paper by URL (public method)
+   * Returns paper data without saving to database
+   */
+  async fetchPaperByUrl(url: string): Promise<Partial<Paper> | null> {
+    return await this.fetchPaperFromUrl(url);
+  }
+
   private async fetchPaperFromUrl(url: string): Promise<Partial<Paper> | null> {
     try {
       console.log(`Determining paper source for URL: ${url}`);
