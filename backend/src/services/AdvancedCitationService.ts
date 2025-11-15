@@ -30,8 +30,18 @@ interface TeiAnalysisResult {
 export class AdvancedCitationService {
   private grobidBaseUrl: string;
 
-  constructor(grobidUrl: string = 'http://localhost:8070') {
-    this.grobidBaseUrl = grobidUrl;
+  constructor(grobidUrl?: string) {
+    // 優先使用傳入的 URL，否則從環境變數讀取
+    const url = grobidUrl || process.env.GROBID_URL;
+    
+    if (!url) {
+      console.error('FATAL ERROR: GROBID_URL environment variable is not set. The application cannot start.');
+      console.error('Please set GROBID_URL in your environment variables or pass it to the constructor.');
+      process.exit(1);
+    }
+    
+    this.grobidBaseUrl = url;
+    console.log(`Using GROBID connection at: ${this.grobidBaseUrl}`);
   }
 
   /**

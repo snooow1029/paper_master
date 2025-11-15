@@ -77,7 +77,7 @@ router.get('/status', async (req, res) => {
         nodeEnv: process.env.NODE_ENV,
         llmUrl: process.env.LOCAL_LLM_URL || 'http://localhost:8000',
         llmModel: process.env.LOCAL_LLM_MODEL || 'Qwen/Qwen3-4B-Instruct-2507',
-        grobidUrl: process.env.GROBID_URL || 'http://localhost:8070'
+        grobidUrl: process.env.GROBID_URL || '(not set - will cause startup failure)'
       }
     };
 
