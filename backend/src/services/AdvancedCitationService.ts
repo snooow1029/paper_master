@@ -35,9 +35,11 @@ export class AdvancedCitationService {
     const url = grobidUrl || process.env.GROBID_URL;
     
     if (!url) {
-      console.error('FATAL ERROR: GROBID_URL environment variable is not set. The application cannot start.');
-      console.error('Please set GROBID_URL in your environment variables or pass it to the constructor.');
-      process.exit(1);
+      console.error('WARNING: GROBID_URL environment variable is not set.');
+      console.error('GROBID features will be disabled. Please set GROBID_URL to enable PDF parsing.');
+      // 設置一個默認值以避免崩潰，但會在 testGrobidConnection 中返回 false
+      this.grobidBaseUrl = 'http://localhost:8070';
+      return;
     }
     
     this.grobidBaseUrl = url;
@@ -48,6 +50,11 @@ export class AdvancedCitationService {
    * Test if GROBID service is available
    */
   async testGrobidConnection(): Promise<boolean> {
+    // 如果 GROBID_URL 未設置，直接返回 false
+    if (!process.env.GROBID_URL && this.grobidBaseUrl === 'http://localhost:8070') {
+      console.log('GROBID_URL not configured, skipping GROBID connection test');
+      return false;
+    }
     try {
       console.log(`Testing GROBID connection at: ${this.grobidBaseUrl}`);
       

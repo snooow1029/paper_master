@@ -9,9 +9,6 @@ import dotenv from 'dotenv';
 // 確保 .env 文件正確加載
 dotenv.config({ path: '.env' });
 
-// Import debug utilities
-import { logStartupInfo, debugEnvironment } from './debug';
-
 import express from 'express';
 import cors from 'cors';
 import { AppDataSource } from './config/database';
@@ -32,9 +29,6 @@ const PORT = parseInt(process.env.PORT || '8080', 10);
 const llmType = process.env.LLM_TYPE || 'disabled';
 const llmUrl = process.env.LOCAL_LLM_URL || 'http://localhost:8000';
 const llmModel = process.env.LOCAL_LLM_MODEL || 'meta-llama/Meta-Llama-3-8B-Instruct';
-
-// Log detailed startup information
-logStartupInfo();
 
 console.log('='.repeat(60));
 console.log('Paper Master Backend Starting...');
@@ -86,22 +80,8 @@ app.get('/', (req, res) => {
   res.json({ 
     message: 'Paper Master API',
     version: '1.0.0',
-    health: '/api/health',
-    debug: '/api/debug'
+    health: '/api/health'
   });
-});
-
-// Debug endpoint - 用於調試部署問題
-app.get('/api/debug', async (req, res) => {
-  try {
-    const debugInfo = await debugEnvironment();
-    res.json(debugInfo);
-  } catch (error) {
-    res.status(500).json({
-      error: error instanceof Error ? error.message : 'Unknown error',
-      stack: error instanceof Error ? error.stack : undefined
-    });
-  }
 });
 
 // Error handling
