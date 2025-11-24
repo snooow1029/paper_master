@@ -6,7 +6,7 @@
   "scripts": {
     "dev": "nodemon src/index.ts",
     "build": "tsc",
-    "prestart": "node scripts/verify-pg.js",
+    "prestart": "node -e \"try { require('pg'); console.log('✅ pg package is installed'); } catch(e) { console.error('❌ pg not found, installing...'); require('child_process').execSync('npm install pg@^8.16.3 --save', {stdio:'inherit'}); }\"",
     "start": "node dist/index.js",
     "start:server": "node dist/start-server.js",
     "lint": "eslint src/**/*.ts",
