@@ -6,7 +6,8 @@ nixPkgs = ["nodejs-20_x"]
 
 [phases.install]
 cmds = [
-  "cd backend && npm ci"
+  "cd backend && npm ci --include=dev",
+  "cd backend && npm list pg || npm install pg@^8.16.3"
 ]
 
 [phases.build]
