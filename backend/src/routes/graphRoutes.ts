@@ -6,10 +6,12 @@
 import { Router } from 'express';
 import { PaperGraphBuilder } from '../services/PaperGraphBuilder';
 import { ObsidianSyncService } from '../services/ObsidianSyncService';
+import { PaperCitationService } from '../services/PaperCitationService';
 
 const router = Router();
 const graphBuilder = new PaperGraphBuilder();
 const obsidianSync = new ObsidianSyncService();
+const citationService = new PaperCitationService();
 
 /**
  * 測試工作流程
@@ -65,24 +67,41 @@ router.post('/build-graph', async (req, res) => {
     
     if (result.success && result.graph) {
       // Transform PaperGraph to frontend GraphData format
+      // 创建 URL 映射以便查找
+      const urlMap = new Map<string, string>();
+      if (result.papers) {
+        result.papers.forEach((paper, index) => {
+          if (paper.url && urls[index]) {
+            urlMap.set(paper.id, paper.url);
+          }
+        });
+      }
+
       const graphData = {
-        nodes: result.graph.nodes.map(node => ({
-          id: node.id,
-          label: node.title, // Add label field using title
-          title: node.title,
-          authors: node.authors,
-          abstract: node.abstract || '', // Use actual abstract from GROBID
-          introduction: '', // Empty for now, can be populated later
-          url: '', // Empty for now, can be populated later
-          tags: node.category ? [node.category] : [], // Use category as tag if available
-          year: node.year || 'Unknown',
-          venue: node.venue || '',
-          conference: '',
-          citationCount: node.citationCount || 0,
-          paperCitationCount: node.paperCitationCount || node.citationCount || 0, // Add paperCitationCount
-          doi: '',
-          arxivId: ''
-        })),
+        nodes: result.graph.nodes.map(node => {
+          // 尝试从 URL 映射中查找，或使用节点自带的 URL
+          const nodeUrl = node.url || urlMap.get(node.id) || '';
+          // 从 URL 提取 arxivId（如果还没有）
+          const nodeArxivId = node.arxivId || (nodeUrl.match(/arxiv\.org\/(?:abs|pdf)\/([^\/\?]+)/i)?.[1]?.replace(/\.pdf$/, ''));
+
+          return {
+            id: node.id,
+            label: node.title, // Add label field using title
+            title: node.title,
+            authors: node.authors,
+            abstract: node.abstract || '', // Use actual abstract from GROBID
+            introduction: '', // Empty for now, can be populated later
+            url: nodeUrl, // 使用保存的 URL 或从映射中获取
+            tags: node.category ? [node.category] : [], // Use category as tag if available
+            year: node.year || 'Unknown',
+            venue: node.venue || '',
+            conference: '',
+            citationCount: node.citationCount || 0,
+            paperCitationCount: node.paperCitationCount || node.citationCount || 0, // Add paperCitationCount
+            doi: '',
+            arxivId: nodeArxivId || ''
+          };
+        }),
         edges: result.graph.edges.map(edge => ({
           source: edge.source,
           target: edge.target,
@@ -102,6 +121,39 @@ router.post('/build-graph', async (req, res) => {
         }))
       );
 
+      // 为原始论文计算 Prior Works 和 Derivative Works
+      console.log('\n=== Computing Prior & Derivative Works for Original Papers ===');
+      const priorWorksMap: Record<string, any[]> = {};
+      const derivativeWorksMap: Record<string, any[]> = {};
+      
+      // 并行计算所有原始论文的 prior 和 derivative works
+      const worksPromises = urls.map(async (url: string, index: number) => {
+        if (!url || !url.trim()) return;
+        
+        try {
+          const [priorWorks, derivativeWorks] = await Promise.all([
+            citationService.getPriorWorksFromUrl(url).catch(err => {
+              console.error(`Error getting prior works for ${url}:`, err);
+              return [];
+            }),
+            citationService.getDerivativeWorksFromUrl(url).catch(err => {
+              console.error(`Error getting derivative works for ${url}:`, err);
+              return [];
+            })
+          ]);
+          
+          priorWorksMap[url] = priorWorks;
+          derivativeWorksMap[url] = derivativeWorks;
+          console.log(`✅ Paper ${index + 1}: ${priorWorks.length} prior works, ${derivativeWorks.length} derivative works`);
+        } catch (error) {
+          console.error(`Error processing works for ${url}:`, error);
+          priorWorksMap[url] = [];
+          derivativeWorksMap[url] = [];
+        }
+      });
+
+      await Promise.all(worksPromises);
+
       res.json({
         success: true,
         graphData: graphData,
@@ -109,6 +161,12 @@ router.post('/build-graph', async (req, res) => {
           totalNodes: graphData.nodes.length,
           totalEdges: graphData.edges.length,
           extractionType: 'standard'
+        },
+        // 添加原始论文的 prior 和 derivative works
+        originalPapers: {
+          urls: urls.filter(u => u && u.trim()),
+          priorWorks: priorWorksMap,
+          derivativeWorks: derivativeWorksMap
         }
       });
     } else {
@@ -203,22 +261,28 @@ router.post('/build-with-filtered-citations', async (req, res) => {
     if (result.success && result.graph) {
       // Transform PaperGraph to frontend GraphData format
       const graphData = {
-        nodes: result.graph.nodes.map(node => ({
-          id: node.id,
-          label: node.title, // Add label field using title
-          title: node.title,
-          authors: node.authors,
-          abstract: node.abstract || '', // Use actual abstract from GROBID
-          introduction: '', // Empty for now, can be populated later
-          url: '', // Empty for now, can be populated later
-          tags: node.category ? [node.category] : [], // Use category as tag if available
-          year: node.year || 'Unknown',
-          venue: node.venue || '',
-          conference: '',
-          citationCount: 0,
-          doi: '',
-          arxivId: ''
-        })),
+        nodes: result.graph.nodes.map(node => {
+          // 从节点中获取 URL 和 arxivId（如果有的话）
+          const nodeUrl = node.url || '';
+          const nodeArxivId = node.arxivId || (nodeUrl.match(/arxiv\.org\/(?:abs|pdf)\/([^\/\?]+)/i)?.[1]?.replace(/\.pdf$/, ''));
+
+          return {
+            id: node.id,
+            label: node.title, // Add label field using title
+            title: node.title,
+            authors: node.authors,
+            abstract: node.abstract || '', // Use actual abstract from GROBID
+            introduction: '', // Empty for now, can be populated later
+            url: nodeUrl, // 使用节点中的 URL
+            tags: node.category ? [node.category] : [], // Use category as tag if available
+            year: node.year || 'Unknown',
+            venue: node.venue || '',
+            conference: '',
+            citationCount: 0,
+            doi: '',
+            arxivId: nodeArxivId || ''
+          };
+        }),
         edges: result.graph.edges.map(edge => ({
           source: edge.source,
           target: edge.target,

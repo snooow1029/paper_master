@@ -25,9 +25,80 @@ const GraphVisualization: React.FC<GraphVisualizationProps> = ({
   const [data, setData] = useState<GraphData>({ nodes: [], edges: [] });
   const [dataVersion, setDataVersion] = useState(0);
 
+  // Filter state: show all nodes or only nodes with edges
+  const [showIsolatedNodes, setShowIsolatedNodes] = useState(true);
+  
+  // Multi-select state: selected node IDs
+  const [selectedNodeIds, setSelectedNodeIds] = useState<Set<string>>(new Set());
+  
+  // Multi-select hint collapse state
+  const [showMultiSelectHint, setShowMultiSelectHint] = useState(true);
+
   // Helper function to check if a node is a source paper
   const isSourceNode = (nodeId: string): boolean => {
     return data.originalPapers?.includes(nodeId) || false;
+  };
+  
+  // Helper function to check if a node has edges
+  const hasEdges = React.useCallback((nodeId: string): boolean => {
+    return data.edges.some(edge => {
+      const sourceId = typeof edge.source === 'string' ? edge.source : (edge.source as Node).id;
+      const targetId = typeof edge.target === 'string' ? edge.target : (edge.target as Node).id;
+      return sourceId === nodeId || targetId === nodeId;
+    });
+  }, [data.edges]);
+  
+  // Delete selected nodes
+  const handleDeleteSelectedNodes = () => {
+    if (selectedNodeIds.size === 0) return;
+    
+    const newData = {
+      ...data,
+      nodes: data.nodes.filter(node => !selectedNodeIds.has(node.id)),
+      edges: data.edges.filter(edge => {
+        const sourceId = typeof edge.source === 'string' ? edge.source : (edge.source as Node).id;
+        const targetId = typeof edge.target === 'string' ? edge.target : (edge.target as Node).id;
+        return !selectedNodeIds.has(sourceId) && !selectedNodeIds.has(targetId);
+      })
+    };
+    setData(newData);
+    setSelectedNodeIds(new Set());
+    setSelectedNode(null);
+    setClickedNode(null);
+    setDataVersion(prev => prev + 1);
+    if (onDataUpdate) {
+      onDataUpdate(newData);
+    }
+  };
+  
+  // Toggle node selection (with Ctrl/Cmd support for multi-select)
+  const toggleNodeSelection = (node: Node, event: MouseEvent) => {
+    const isMultiSelect = event.ctrlKey || event.metaKey;
+    
+    if (isMultiSelect) {
+      // Multi-select mode
+      const newSelectedIds = new Set(selectedNodeIds);
+      if (newSelectedIds.has(node.id)) {
+        newSelectedIds.delete(node.id);
+      } else {
+        newSelectedIds.add(node.id);
+      }
+      setSelectedNodeIds(newSelectedIds);
+      // Keep the last clicked node as the primary selected node for display
+      setSelectedNode(node);
+      setClickedNode(node);
+    } else {
+      // Single select mode (existing behavior)
+      if (clickedNode && clickedNode.id === node.id) {
+        setSelectedNode(null);
+        setClickedNode(null);
+        setSelectedNodeIds(new Set());
+      } else {
+        setSelectedNode(node);
+        setClickedNode(node);
+        setSelectedNodeIds(new Set([node.id]));
+      }
+    }
   };
 
   // Debug: consume hover state to prevent TS warnings
@@ -36,6 +107,29 @@ const GraphVisualization: React.FC<GraphVisualizationProps> = ({
       // These states are used for visual feedback but no additional logic needed here
     }
   }, [hoveredNode, hoveredEdge]);
+  
+  // Clean up selected nodes when filter mode changes
+  useEffect(() => {
+    if (!showIsolatedNodes) {
+      // When filtering to only show connected nodes, remove isolated nodes from selection
+      const filteredNodes = data.nodes.filter(node => hasEdges(node.id));
+      const filteredNodeIds = new Set(filteredNodes.map(n => n.id));
+      const newSelectedIds = new Set<string>();
+      selectedNodeIds.forEach(id => {
+        if (filteredNodeIds.has(id)) {
+          newSelectedIds.add(id);
+        }
+      });
+      if (newSelectedIds.size !== selectedNodeIds.size) {
+        setSelectedNodeIds(newSelectedIds);
+        // If the selected node was filtered out, clear it
+        if (selectedNode && !filteredNodeIds.has(selectedNode.id)) {
+          setSelectedNode(null);
+          setClickedNode(null);
+        }
+      }
+    }
+  }, [showIsolatedNodes, data.nodes]);
 
   // Update data when initialData changes
   useEffect(() => {
@@ -202,9 +296,21 @@ const GraphVisualization: React.FC<GraphVisualizationProps> = ({
     const svg = d3.select(svgRef.current);
     svg.selectAll("*").remove();
 
-    const width = 1000;
-    const height = 700;
-    const margin = { top: 20, right: 20, bottom: 20, left: 20 };
+    // Get actual container dimensions
+    const container = svgRef.current.parentElement;
+    const width = container ? container.clientWidth : 1000;
+    const height = container ? container.clientHeight : 700;
+    
+    // Reserve space for control panels in top-left corner
+    // Control panels are approximately 320px wide and can stack vertically
+    const controlPanelWidth = 320;
+    const controlPanelTopSpace = selectedNodeIds.size > 0 ? 180 : (showMultiSelectHint ? 180 : 80);
+    const margin = { 
+      top: Math.max(40, controlPanelTopSpace), 
+      right: 40, 
+      bottom: 40, 
+      left: Math.max(40, controlPanelWidth) 
+    };
 
     svg.attr('width', width).attr('height', height);
     
@@ -237,11 +343,76 @@ const GraphVisualization: React.FC<GraphVisualizationProps> = ({
     edgeGradient.append('stop').attr('offset', '0%').attr('stop-color', '#B89B74').attr('stop-opacity', 0.8);
     edgeGradient.append('stop').attr('offset', '100%').attr('stop-color', '#D2CBBF').attr('stop-opacity', 0.6);
 
-    // ✅ **FIX 1: Added a newline here.**
-    const g = svg.append('g');
+    // Create main group with proper transform for margins
+    const g = svg.append('g').attr('transform', `translate(${margin.left},${margin.top})`);
+    
+    // Adjust simulation dimensions to account for margins
+    const graphWidth = width - margin.left - margin.right;
+    const graphHeight = height - margin.top - margin.bottom;
 
-    const links = g.selectAll('.link').data(data.edges).enter().append('line').attr('class', 'link');
-    const nodes = g.selectAll('.node').data(data.nodes).enter().append('circle').attr('class', 'node');
+    // Get filtered nodes and edges
+    // Important: Filter nodes based on showIsolatedNodes setting
+    const filteredNodes = showIsolatedNodes 
+      ? data.nodes 
+      : data.nodes.filter(node => {
+          // Check if node has at least one edge
+          return data.edges.some(edge => {
+            const sourceId = typeof edge.source === 'string' ? edge.source : (edge.source as Node).id;
+            const targetId = typeof edge.target === 'string' ? edge.target : (edge.target as Node).id;
+            return sourceId === node.id || targetId === node.id;
+          });
+        });
+    const visibleNodeIds = new Set(filteredNodes.map(n => n.id));
+    const filteredEdges = data.edges.filter(edge => {
+      const sourceId = typeof edge.source === 'string' ? edge.source : (edge.source as Node).id;
+      const targetId = typeof edge.target === 'string' ? edge.target : (edge.target as Node).id;
+      return visibleNodeIds.has(sourceId) && visibleNodeIds.has(targetId);
+    });
+
+    // Use D3 join pattern to properly handle enter/update/exit
+    const links = g.selectAll('.link')
+      .data(filteredEdges, (d: any) => {
+        const sourceId = typeof d.source === 'string' ? d.source : (d.source as Node).id;
+        const targetId = typeof d.target === 'string' ? d.target : (d.target as Node).id;
+        return `${sourceId}-${targetId}`;
+      });
+    
+    // Remove exiting links
+    links.exit().remove();
+    
+    // Add entering links
+    const linksEnter = links.enter().append('line').attr('class', 'link');
+    const linksUpdate = linksEnter.merge(links as any);
+    
+    const nodes = g.selectAll('.node')
+      .data(filteredNodes, (d: any) => d.id);
+    
+    // Remove exiting nodes
+    nodes.exit().remove();
+    
+    // Add entering nodes
+    const nodesEnter = nodes.enter().append('circle').attr('class', 'node');
+    const nodesUpdate = nodesEnter.merge(nodes as any);
+    
+    // Update links styling
+    linksUpdate
+      .attr('stroke', '#D2CBBF')
+      .attr('stroke-width', (d: any) => Math.sqrt(d.strength * 8) + 1)
+      .attr('opacity', 0.6)
+      .style('cursor', 'pointer');
+    
+    // Update nodes styling
+    nodesUpdate
+      .attr('r', 26)
+      .attr('fill', (d: Node) => isSourceNode(d.id) ? 'url(#sourceNodeGradient)' : 'url(#nodeGradient)')
+      .attr('stroke', (d: Node) => {
+        return selectedNodeIds.has(d.id) ? '#9F7AEA' : '#F5F5DC';
+      })
+      .attr('stroke-width', (d: Node) => {
+        return selectedNodeIds.has(d.id) ? 3 : 2;
+      })
+      .attr('filter', 'url(#dropShadow)')
+      .style('cursor', 'pointer');
 
     svg.on('click', function(event) {
       if (event.target === this || (event.target as SVGElement).tagName === 'svg') {
@@ -251,12 +422,16 @@ const GraphVisualization: React.FC<GraphVisualizationProps> = ({
         }
         
         // Reset all visual states
-        links.attr('stroke', '#D2CBBF').attr('opacity', 0.6).attr('stroke-width', (d: any) => Math.sqrt(d.strength * 8) + 1);
-        nodes
+        linksUpdate.attr('stroke', '#D2CBBF').attr('opacity', 0.6).attr('stroke-width', (d: any) => Math.sqrt(d.strength * 8) + 1);
+        nodesUpdate
           .attr('r', 26)
           .attr('fill', (d: Node) => isSourceNode(d.id) ? 'url(#sourceNodeGradient)' : 'url(#nodeGradient)')
-          .style('stroke', '#F5F5DC')
-          .style('stroke-width', 2);
+          .attr('stroke', (d: Node) => {
+            return selectedNodeIds.has(d.id) ? '#9F7AEA' : '#F5F5DC';
+          })
+          .attr('stroke-width', (d: Node) => {
+            return selectedNodeIds.has(d.id) ? 3 : 2;
+          });
         
         // Clear all states
         setSelectedNode(null);
@@ -265,34 +440,90 @@ const GraphVisualization: React.FC<GraphVisualizationProps> = ({
         setClickedEdge(null);
         setHoveredNode(null);
         setHoveredEdge(null);
+        setSelectedNodeIds(new Set());
       }
     });
   
-    const simulation = d3.forceSimulation<Node>(data.nodes)
-      .force('link', d3.forceLink<Node, Edge>(data.edges).id(d => d.id).distance(120).strength(0.1))
-      .force('charge', d3.forceManyBody().strength(-200).theta(0.9))
-      .force('center', d3.forceCenter(width * 0.4, height / 2)) // 偏左顯示，從 width/2 改為 width*0.4
-      .force('collision', d3.forceCollide().radius(35))
-      .force('boundary', () => {
-        const nodeRadius = 25;
-        const minX = margin.left + nodeRadius;
-        const maxX = width - margin.right - nodeRadius;
-        const minY = margin.top + nodeRadius;
-        const maxY = height - margin.bottom - nodeRadius;
-        data.nodes.forEach(d => {
-          if (d.x !== undefined) d.x = Math.max(minX, Math.min(maxX, d.x));
-          if (d.y !== undefined) d.y = Math.max(minY, Math.min(maxY, d.y));
-        });
-      })
-      .alphaDecay(0.02)
-      .velocityDecay(0.3);
+    // Identify source nodes (original papers) for better layout
+    const sourceNodeIds = new Set(data.originalPapers || []);
+    
+    // Initialize node positions - source nodes near center (accounting for margins)
+    const centerX = graphWidth / 2;
+    const centerY = graphHeight / 2;
+    filteredNodes.forEach((node, i) => {
+      if (!node.x || !node.y) {
+        if (isSourceNode(node.id)) {
+          // Source nodes: place near center with slight spread
+          const angle = (i * 2 * Math.PI) / Math.max(sourceNodeIds.size, 1);
+          const radius = 80;
+          node.x = centerX + Math.cos(angle) * radius;
+          node.y = centerY + Math.sin(angle) * radius;
+        } else {
+          // Other nodes: spread randomly but not too far (accounting for margins)
+          node.x = centerX + (Math.random() - 0.5) * graphWidth * 0.6;
+          node.y = centerY + (Math.random() - 0.5) * graphHeight * 0.6;
+        }
+      }
+    });
 
-    links
-      .attr('stroke', '#D2CBBF')
-      .attr('stroke-width', (d) => Math.sqrt(d.strength * 8) + 1)
-      .attr('opacity', 0.6)
-      .style('cursor', 'pointer')
-      .on('click', (_event, d) => {
+    // Calculate optimal link distance based on graph size (using filtered data)
+    const nodeCount = filteredNodes.length;
+    const edgeCount = filteredEdges.length;
+    const avgDegree = edgeCount / nodeCount;
+    
+    // Adaptive distance: larger graphs need more space
+    const baseDistance = Math.max(150, Math.min(250, 100 + nodeCount * 2));
+    const linkDistance = baseDistance;
+    
+    // Adaptive charge strength: larger graphs need stronger repulsion
+    const baseCharge = -300;
+    const chargeStrength = baseCharge - nodeCount * 5;
+
+    const simulation = d3.forceSimulation<Node>(filteredNodes)
+      .force('link', d3.forceLink<Node, Edge>(filteredEdges)
+        .id(d => d.id)
+        .distance((d: any) => {
+          // Vary distance based on relationship strength
+          const strength = d.strength || 0.5;
+          return linkDistance * (0.8 + strength * 0.4); // 80% to 120% of base distance
+        })
+        .strength((d: any) => {
+          // Stronger links pull nodes closer
+          return (d.strength || 0.5) * 0.5;
+        }))
+      .force('charge', d3.forceManyBody()
+        .strength((d: Node) => {
+          // Source nodes have less repulsion (stay closer to center)
+          if (isSourceNode(d.id)) {
+            return chargeStrength * 0.7;
+          }
+          return chargeStrength;
+        })
+        .theta(0.9)
+        .distanceMax(Math.min(graphWidth, graphHeight) * 0.6))
+      .force('center', d3.forceCenter(centerX, centerY).strength(0.05))
+      .force('collision', d3.forceCollide()
+        .radius((d: Node) => {
+          // Larger radius for source nodes and nodes with more citations
+          const baseRadius = 35;
+          if (isSourceNode(d.id)) {
+            return baseRadius + 6;
+          }
+          const citationCount = d.citationCount || 0;
+          return baseRadius + Math.min(citationCount / 50, 5); // Slightly larger for highly cited papers
+        })
+        .strength(0.85))
+      .force('x', d3.forceX(centerX).strength(0.02))
+      .force('y', d3.forceY(centerY).strength(0.02))
+      .alphaDecay(0.022)
+      .velocityDecay(0.4)
+        .alpha(1)
+        .restart();
+    
+    // Links click handler (attached before mouse handlers)
+    linksUpdate
+      .on('click', (event, d) => {
+        event.stopPropagation(); // Prevent event from bubbling to SVG
         // Check if the same edge was clicked
         if (clickedEdge && clickedEdge === d) {
           // If edge is in editing mode, don't toggle off
@@ -312,12 +543,12 @@ const GraphVisualization: React.FC<GraphVisualizationProps> = ({
         setEditEdgeData(null);
         
         // Apply clicked edge styling
-        links
+        linksUpdate
           .attr('stroke', (linkData: any) => (linkData === d) ? 'url(#edgeGradient)' : '#EAE8E1')
           .attr('opacity', (linkData: any) => (linkData === d) ? 1 : 0.3)
           .attr('stroke-width', (linkData: any) => (linkData === d) ? Math.sqrt(linkData.strength * 12) + 6 : Math.sqrt(linkData.strength * 12) + 3);
         
-        nodes
+        nodesUpdate
           .attr('r', (nodeData: any) => {
             const sourceId = (d.source as Node).id || d.source;
             const targetId = (d.target as Node).id || d.target;
@@ -335,6 +566,7 @@ const GraphVisualization: React.FC<GraphVisualizationProps> = ({
             return (nodeData.id === sourceId || nodeData.id === targetId) ? 4 : 2;
           });
       })
+    linksUpdate
       .on('mouseenter', function(_event, d) {
         // Only apply hover if this edge is not clicked
         if (!clickedEdge || clickedEdge !== d) {
@@ -356,14 +588,17 @@ const GraphVisualization: React.FC<GraphVisualizationProps> = ({
         }
       });
 
-    nodes
-      .attr('r', 26)
-      .attr('fill', (d: Node) => isSourceNode(d.id) ? 'url(#sourceNodeGradient)' : 'url(#nodeGradient)')
-      .attr('stroke', '#F5F5DC')
-      .attr('stroke-width', 2)
-      .attr('filter', 'url(#dropShadow)')
-      .style('cursor', 'pointer')
-      .on('click', (_event, d) => {
+    // Attach click and mouse event handlers to nodesUpdate (not nodes)
+    nodesUpdate
+      .on('click', (event, d) => {
+        event.stopPropagation(); // Prevent event from bubbling to SVG
+        
+        // Handle multi-select with Ctrl/Cmd key
+        if (event.ctrlKey || event.metaKey) {
+          toggleNodeSelection(d, event as any);
+          return;
+        }
+        
         // Check if the same node was clicked
         if (clickedNode && clickedNode.id === d.id) {
           // If node is in editing mode, don't toggle off
@@ -374,21 +609,27 @@ const GraphVisualization: React.FC<GraphVisualizationProps> = ({
           // Clicked the same node again: toggle off selection
           setClickedNode(null);
           setSelectedNode(null);
+          setSelectedNodeIds(new Set());
           // Restore all nodes and links to initial state
-          links
+          linksUpdate
             .attr('stroke', '#D2CBBF')
             .attr('opacity', 0.6)
             .attr('stroke-width', (linkData: any) => Math.sqrt(linkData.strength * 8) + 1);
           
-          nodes
+          nodesUpdate
             .attr('r', 26)
             .attr('fill', (d: Node) => isSourceNode(d.id) ? 'url(#sourceNodeGradient)' : 'url(#nodeGradient)')
-            .style('stroke', '#F5F5DC')
-            .style('stroke-width', 2);
+            .attr('stroke', (nodeData: any) => {
+              return selectedNodeIds.has(nodeData.id) ? '#9F7AEA' : '#F5F5DC';
+            })
+            .attr('stroke-width', (nodeData: any) => {
+              return selectedNodeIds.has(nodeData.id) ? 3 : 2;
+            });
         } else {
           // Clicked a new node: set as current clicked node
           setClickedNode(d);
           setSelectedNode(d);
+          setSelectedNodeIds(new Set([d.id]));
           setClickedEdge(null); // Clear clicked edge state
           
           // Exit any existing editing mode when clicking a different node
@@ -398,12 +639,24 @@ const GraphVisualization: React.FC<GraphVisualizationProps> = ({
           setEditEdgeData(null);
           
           // Apply clicked node styling
-          links
-            .attr('stroke', (linkData: any) => ((linkData.source as Node).id === d.id || (linkData.target as Node).id === d.id) ? 'url(#edgeGradient)' : '#D2CBBF')
-            .attr('opacity', (linkData: any) => ((linkData.source as Node).id === d.id || (linkData.target as Node).id === d.id) ? 0.9 : 0.3)
-            .attr('stroke-width', (linkData: any) => ((linkData.source as Node).id === d.id || (linkData.target as Node).id === d.id) ? Math.sqrt(linkData.strength * 8) + 3 : Math.sqrt(linkData.strength * 8) + 1);
+          linksUpdate
+            .attr('stroke', (linkData: any) => {
+              const sourceId = typeof linkData.source === 'string' ? linkData.source : (linkData.source as Node).id;
+              const targetId = typeof linkData.target === 'string' ? linkData.target : (linkData.target as Node).id;
+              return (sourceId === d.id || targetId === d.id) ? 'url(#edgeGradient)' : '#D2CBBF';
+            })
+            .attr('opacity', (linkData: any) => {
+              const sourceId = typeof linkData.source === 'string' ? linkData.source : (linkData.source as Node).id;
+              const targetId = typeof linkData.target === 'string' ? linkData.target : (linkData.target as Node).id;
+              return (sourceId === d.id || targetId === d.id) ? 0.9 : 0.3;
+            })
+            .attr('stroke-width', (linkData: any) => {
+              const sourceId = typeof linkData.source === 'string' ? linkData.source : (linkData.source as Node).id;
+              const targetId = typeof linkData.target === 'string' ? linkData.target : (linkData.target as Node).id;
+              return (sourceId === d.id || targetId === d.id) ? Math.sqrt(linkData.strength * 8) + 3 : Math.sqrt(linkData.strength * 8) + 1;
+            });
           
-          nodes
+          nodesUpdate
             .attr('r', (nodeData: any) => nodeData.id === d.id ? 32 : 26)
             .attr('fill', (nodeData: any) => {
               if (nodeData.id === d.id) {
@@ -411,8 +664,14 @@ const GraphVisualization: React.FC<GraphVisualizationProps> = ({
               }
               return isSourceNode(nodeData.id) ? 'url(#sourceNodeGradient)' : 'url(#nodeGradient)';
             })
-            .style('stroke', (nodeData: any) => nodeData.id === d.id ? '#c3a4ffff' : '#F5F5DC')
-            .style('stroke-width', (nodeData: any) => nodeData.id === d.id ? 3 : 2);
+            .attr('stroke', (nodeData: any) => {
+              if (nodeData.id === d.id) return '#c3a4ffff';
+              return selectedNodeIds.has(nodeData.id) ? '#9F7AEA' : '#F5F5DC';
+            })
+            .attr('stroke-width', (nodeData: any) => {
+              if (nodeData.id === d.id) return 3;
+              return selectedNodeIds.has(nodeData.id) ? 3 : 2;
+            });
         }
       })
       // Mouse event handlers
@@ -422,10 +681,22 @@ const GraphVisualization: React.FC<GraphVisualizationProps> = ({
           setHoveredNode(d);
           
           // Apply hover styling for links
-          links
-            .attr('stroke', (linkData: any) => ((linkData.source as Node).id === d.id || (linkData.target as Node).id === d.id) ? '#B89B74' : '#D2CBBF')
-            .attr('opacity', (linkData: any) => ((linkData.source as Node).id === d.id || (linkData.target as Node).id === d.id) ? 0.9 : 0.4)
-            .attr('stroke-width', (linkData: any) => ((linkData.source as Node).id === d.id || (linkData.target as Node).id === d.id) ? Math.sqrt(linkData.strength * 8) + 2 : Math.sqrt(linkData.strength * 8) + 1);
+          linksUpdate
+            .attr('stroke', (linkData: any) => {
+              const sourceId = typeof linkData.source === 'string' ? linkData.source : (linkData.source as Node).id;
+              const targetId = typeof linkData.target === 'string' ? linkData.target : (linkData.target as Node).id;
+              return (sourceId === d.id || targetId === d.id) ? '#B89B74' : '#D2CBBF';
+            })
+            .attr('opacity', (linkData: any) => {
+              const sourceId = typeof linkData.source === 'string' ? linkData.source : (linkData.source as Node).id;
+              const targetId = typeof linkData.target === 'string' ? linkData.target : (linkData.target as Node).id;
+              return (sourceId === d.id || targetId === d.id) ? 0.9 : 0.4;
+            })
+            .attr('stroke-width', (linkData: any) => {
+              const sourceId = typeof linkData.source === 'string' ? linkData.source : (linkData.source as Node).id;
+              const targetId = typeof linkData.target === 'string' ? linkData.target : (linkData.target as Node).id;
+              return (sourceId === d.id || targetId === d.id) ? Math.sqrt(linkData.strength * 8) + 2 : Math.sqrt(linkData.strength * 8) + 1;
+            });
           
           // Apply hover styling for this node
           d3.select(this)
@@ -442,7 +713,7 @@ const GraphVisualization: React.FC<GraphVisualizationProps> = ({
           
           // Restore links if no node or edge is selected
           if (!selectedNode && !selectedEdge) {
-            links
+            linksUpdate
               .attr('stroke', '#D2CBBF')
               .attr('opacity', 0.6)
               .attr('stroke-width', (linkData: any) => Math.sqrt(linkData.strength * 8) + 1);
@@ -452,8 +723,8 @@ const GraphVisualization: React.FC<GraphVisualizationProps> = ({
           d3.select(this)
             .attr('r', 26)
             .attr('fill', isSourceNode(d.id) ? 'url(#sourceNodeGradient)' : 'url(#nodeGradient)')
-            .style('stroke', '#F5F5DC')
-            .style('stroke-width', 2);
+            .attr('stroke', selectedNodeIds.has(d.id) ? '#9F7AEA' : '#F5F5DC')
+            .attr('stroke-width', selectedNodeIds.has(d.id) ? 3 : 2);
         }
       })
       .on('dblclick', (_event, d) => {
@@ -464,7 +735,14 @@ const GraphVisualization: React.FC<GraphVisualizationProps> = ({
         simulation.alpha(0.03).restart();
       });
 
-    const titleLabels = g.selectAll('.title-label').data(data.nodes).enter().append('text')
+    // Handle labels with enter/update/exit pattern
+    // Handle labels with enter/update/exit pattern
+    const titleLabels = g.selectAll('.title-label')
+      .data(filteredNodes, (d: any) => d.id);
+    
+    titleLabels.exit().remove();
+    
+    const titleLabelsEnter = titleLabels.enter().append('text')
       .attr('class', 'title-label')
       .attr('dx', 32)
       .attr('dy', -6)
@@ -472,8 +750,10 @@ const GraphVisualization: React.FC<GraphVisualizationProps> = ({
       .style('font-family', '"Lora", "Merriweather", "Georgia", serif')
       .style('font-weight', '400')
       .style('fill', '#5D4037')
-      .style('cursor', 'pointer')
-      .text((d) => d.title.length > 28 ? d.title.substring(0, 28) + '…' : d.title)
+      .style('cursor', 'pointer');
+    
+    const titleLabelsUpdate = titleLabelsEnter.merge(titleLabels as any);
+    titleLabelsUpdate.text((d) => d.title.length > 28 ? d.title.substring(0, 28) + '…' : d.title)
       // ✅ **FIX 3: Removed the entire duplicated `dblclick` handler.**
       .on('dblclick', (event, d) => {
         event.stopPropagation();
@@ -521,7 +801,7 @@ const GraphVisualization: React.FC<GraphVisualizationProps> = ({
         });
       });
 
-    const yearLabels = g.selectAll('.year-label').data(data.nodes).enter().append('text')
+    const yearLabels = g.selectAll('.year-label').data(filteredNodes).enter().append('text')
       .attr('class', 'year-label')
       .attr('dx', 32)
       .attr('dy', 14)
@@ -548,34 +828,60 @@ const GraphVisualization: React.FC<GraphVisualizationProps> = ({
       })
       .on('drag', (event, d) => {
         const nodeRadius = 25;
-        const minX = margin.left + nodeRadius;
-        const maxX = width - margin.right - nodeRadius;
-        const minY = margin.top + nodeRadius;
-        const maxY = height - margin.bottom - nodeRadius;
+        const minX = nodeRadius;
+        const maxX = graphWidth - nodeRadius;
+        const minY = nodeRadius;
+        const maxY = graphHeight - nodeRadius;
         d.fx = Math.max(minX, Math.min(maxX, event.x));
         d.fy = Math.max(minY, Math.min(maxY, event.y));
       })
       .on('end', (event, _d) => {
         if (!event.active) simulation.alphaTarget(0);
       });
-    nodes.call(drag);
+    nodesUpdate.call(drag);
 
     simulation.on('tick', () => {
-      links
-        .attr('x1', (d: any) => d.source.x)
-        .attr('y1', (d: any) => d.source.y)
-        .attr('x2', (d: any) => d.target.x)
-        .attr('y2', (d: any) => d.target.y);
+      // Apply boundary constraints (within graph area, accounting for margins)
+      const nodeRadius = 35;
+      const minX = nodeRadius;
+      const maxX = graphWidth - nodeRadius;
+      const minY = nodeRadius;
+      const maxY = graphHeight - nodeRadius;
+      
+      filteredNodes.forEach(d => {
+        if (d.x !== undefined && d.y !== undefined) {
+          d.x = Math.max(minX, Math.min(maxX, d.x));
+          d.y = Math.max(minY, Math.min(maxY, d.y));
+        }
+      });
 
-      nodes.attr('cx', (d: any) => d.x!).attr('cy', (d: any) => d.y!);
-      titleLabels.attr('x', (d: any) => d.x!).attr('y', (d: any) => d.y!);
-      yearLabels.attr('x', (d: any) => d.x!).attr('y', (d: any) => d.y!);
+      linksUpdate
+        .attr('x1', (d: any) => {
+          const source = typeof d.source === 'string' ? filteredNodes.find(n => n.id === d.source) : d.source;
+          return (source as any)?.x || 0;
+        })
+        .attr('y1', (d: any) => {
+          const source = typeof d.source === 'string' ? filteredNodes.find(n => n.id === d.source) : d.source;
+          return (source as any)?.y || 0;
+        })
+        .attr('x2', (d: any) => {
+          const target = typeof d.target === 'string' ? filteredNodes.find(n => n.id === d.target) : d.target;
+          return (target as any)?.x || 0;
+        })
+        .attr('y2', (d: any) => {
+          const target = typeof d.target === 'string' ? filteredNodes.find(n => n.id === d.target) : d.target;
+          return (target as any)?.y || 0;
+        });
+
+      nodesUpdate.attr('cx', (d: any) => d.x || 0).attr('cy', (d: any) => d.y || 0);
+      titleLabelsUpdate.attr('x', (d: any) => d.x || 0).attr('y', (d: any) => (d.y || 0) - 10);
+      yearLabelsUpdate.attr('x', (d: any) => d.x || 0).attr('y', (d: any) => (d.y || 0) + 10);
     });
 
     return () => {
       simulation.stop();
     };
-  }, [data, dataVersion, onDataUpdate, isEditingNode, isEditingEdge]);
+  }, [data, dataVersion, onDataUpdate, isEditingNode, isEditingEdge, showIsolatedNodes, selectedNodeIds, hasEdges]);
 
   // Separate useEffect to maintain highlighting during editing
   useEffect(() => {
@@ -632,11 +938,253 @@ const GraphVisualization: React.FC<GraphVisualizationProps> = ({
   }, [isEditingNode, isEditingEdge, selectedNode, selectedEdge, data]);
 
   return (
-    <div style={{ width: '100%', height: '700px', position: 'relative', backgroundColor: '#F5F5DC', borderRadius: '12px', overflow: 'hidden' }}>
-      <svg ref={svgRef} style={{ width: '100%', height: '100%', border: `1px solid #D2CBBF`, backgroundColor: '#F5F5DC', borderRadius: '12px' }} />
+    <div style={{ width: '100%', height: '100%', position: 'relative', backgroundColor: '#F5F5DC', borderRadius: '12px', overflow: 'hidden' }}>
+      {/* Toggle button and controls in top-left */}
+      <div style={{ 
+        position: 'absolute', 
+        top: '16px', 
+        left: '16px', 
+        zIndex: 1000,
+        display: 'flex',
+        flexDirection: 'column',
+        gap: '12px'
+      }}>
+        {/* Toggle switch for showing/hiding isolated nodes */}
+        <div style={{
+          background: '#F5F5DC',
+          border: `2px solid #BDB4D3`,
+          borderRadius: '8px',
+          padding: '12px 16px',
+          boxShadow: '0 2px 8px rgba(189, 180, 211, 0.25)',
+          display: 'flex',
+          alignItems: 'center',
+          gap: '12px',
+          fontFamily: '"Lora", "Merriweather", "Georgia", serif'
+        }}>
+          <span style={{ 
+            fontSize: '13px', 
+            color: '#5D4037',
+            fontWeight: '500',
+            whiteSpace: 'nowrap'
+          }}>
+            {showIsolatedNodes ? 'Show All Nodes' : 'Hide Nodes with No Edges'}
+          </span>
+          
+          {/* Toggle Switch - White circle on left/right */}
+          <button
+            onClick={() => setShowIsolatedNodes(!showIsolatedNodes)}
+            className="flex items-center justify-start rounded-full transition-all duration-200 relative"
+            style={{
+              width: '44px',
+              height: '24px',
+              backgroundColor: showIsolatedNodes ? '#BDB4D3' : '#D2CBBF',
+              padding: '2px',
+              border: 'none',
+              cursor: 'pointer',
+              boxShadow: 'inset 0 2px 4px rgba(0, 0, 0, 0.1)'
+            }}
+            title={showIsolatedNodes ? 'Switch to hide isolated nodes' : 'Switch to show all nodes'}
+            onMouseEnter={(e) => {
+              e.currentTarget.style.backgroundColor = showIsolatedNodes ? '#A39A86' : '#BDB4D3';
+            }}
+            onMouseLeave={(e) => {
+              e.currentTarget.style.backgroundColor = showIsolatedNodes ? '#BDB4D3' : '#D2CBBF';
+            }}
+          >
+            <div 
+              className="absolute rounded-full bg-white shadow-sm transition-all duration-200"
+              style={{
+                width: '20px',
+                height: '20px',
+                left: showIsolatedNodes ? '22px' : '2px',
+                top: '2px',
+                boxShadow: '0 2px 4px rgba(0, 0, 0, 0.2)'
+              }}
+            />
+          </button>
+          
+          <span style={{ 
+            fontSize: '11px', 
+            color: '#707C5D',
+            fontStyle: 'italic'
+          }}>
+            {showIsolatedNodes ? '(including isolated nodes)' : '(connected nodes only)'}
+          </span>
+        </div>
+        
+        {/* Multi-select hint */}
+        {selectedNodeIds.size === 0 && (
+          <div style={{
+            background: '#F5F5DC',
+            border: `2px solid #BDB4D3`,
+            borderRadius: '8px',
+            padding: '10px 14px',
+            boxShadow: '0 2px 8px rgba(189, 180, 211, 0.2)',
+            fontFamily: '"Lora", "Merriweather", "Georgia", serif',
+            maxWidth: '280px'
+          }}>
+            <div style={{ 
+              display: 'flex', 
+              alignItems: 'center', 
+              justifyContent: 'space-between',
+              marginBottom: showMultiSelectHint ? '4px' : '0',
+              cursor: 'pointer'
+            }}
+            onClick={() => setShowMultiSelectHint(!showMultiSelectHint)}
+            >
+              <div style={{ fontSize: '12px', color: '#5D4037', fontWeight: '500' }}>
+                💡 Multi-Select Nodes
+              </div>
+              <button
+                onClick={(e) => {
+                  e.stopPropagation();
+                  setShowMultiSelectHint(!showMultiSelectHint);
+                }}
+                style={{
+                  background: 'transparent',
+                  border: 'none',
+                  cursor: 'pointer',
+                  fontSize: '14px',
+                  color: '#707C5D',
+                  padding: '2px 4px',
+                  display: 'flex',
+                  alignItems: 'center',
+                  transition: 'transform 0.2s'
+                }}
+                title={showMultiSelectHint ? 'Collapse hint' : 'Expand hint'}
+              >
+                {showMultiSelectHint ? '▼' : '▶'}
+              </button>
+            </div>
+            {showMultiSelectHint && (
+              <div style={{ fontSize: '11px', color: '#707C5D', lineHeight: '1.4' }}>
+                Hold <kbd style={{ 
+                  background: '#E5E7EB', 
+                  padding: '2px 6px', 
+                  borderRadius: '4px', 
+                  fontSize: '10px',
+                  fontFamily: 'monospace',
+                  fontWeight: '600',
+                  color: '#374151'
+                }}>Ctrl</kbd> (Windows/Linux) or <kbd style={{ 
+                  background: '#E5E7EB', 
+                  padding: '2px 6px', 
+                  borderRadius: '4px', 
+                  fontSize: '10px',
+                  fontFamily: 'monospace',
+                  fontWeight: '600',
+                  color: '#374151'
+                }}>Cmd</kbd> (Mac) and click nodes to select multiple
+              </div>
+            )}
+          </div>
+        )}
+        
+        {/* Delete selected nodes button */}
+        {selectedNodeIds.size > 0 && (
+          <div style={{
+            background: '#F5F5DC',
+            border: `2px solid #F59E0B`,
+            borderRadius: '8px',
+            padding: '10px 14px',
+            boxShadow: '0 2px 8px rgba(245, 158, 11, 0.25)',
+            display: 'flex',
+            flexDirection: 'column',
+            gap: '8px',
+            fontFamily: '"Lora", "Merriweather", "Georgia", serif',
+            maxWidth: '280px'
+          }}>
+            <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+              <button
+                onClick={handleDeleteSelectedNodes}
+                style={{
+                  background: '#F59E0B',
+                  border: 'none',
+                  borderRadius: '6px',
+                  padding: '6px 12px',
+                  cursor: 'pointer',
+                  color: '#FFFFFF',
+                  fontSize: '12px',
+                  fontWeight: '500',
+                  transition: 'all 0.2s',
+                  fontFamily: 'inherit'
+                }}
+                onMouseEnter={(e) => {
+                  e.currentTarget.style.background = '#D97706';
+                }}
+                onMouseLeave={(e) => {
+                  e.currentTarget.style.background = '#F59E0B';
+                }}
+              >
+                🗑️ Delete ({selectedNodeIds.size})
+              </button>
+              <span style={{ fontSize: '11px', color: '#707C5D' }}>
+                {selectedNodeIds.size} node{selectedNodeIds.size > 1 ? 's' : ''} selected
+              </span>
+            </div>
+            <div style={{ fontSize: '10px', color: '#707C5D', fontStyle: 'italic', lineHeight: '1.3' }}>
+              Continue holding <kbd style={{ 
+                background: '#E5E7EB', 
+                padding: '1px 4px', 
+                borderRadius: '3px', 
+                fontSize: '9px',
+                fontFamily: 'monospace',
+                fontWeight: '600',
+                color: '#374151'
+              }}>Ctrl</kbd>/<kbd style={{ 
+                background: '#E5E7EB', 
+                padding: '1px 4px', 
+                borderRadius: '3px', 
+                fontSize: '9px',
+                fontFamily: 'monospace',
+                fontWeight: '600',
+                color: '#374151'
+              }}>Cmd</kbd> to select more
+            </div>
+          </div>
+        )}
+      </div>
       
-      {selectedNode && !isEditingNode && (
-        <div style={{ position: 'absolute', top: '24px', right: '16px', background: '#F5F5DC', border: `2px solid #BDB4D3`, padding: '20px', borderRadius: '12px', boxShadow: '0 3px 12px rgba(189, 180, 211, 0.25)', width: '500px', maxHeight: '280px', overflowY: 'auto', fontFamily: '"Lora", "Merriweather", "Georgia", serif' }}>
+      <svg ref={svgRef} style={{ width: '100%', height: '100%', display: 'block', border: `1px solid #D2CBBF`, backgroundColor: '#F5F5DC', borderRadius: '12px' }} />
+      
+      {selectedNode && !isEditingNode && (() => {
+        // Calculate position to keep panel within bounds
+        const panelWidth = 500;
+        const panelMaxHeight = 280;
+        const padding = 16;
+        const container = svgRef.current?.parentElement;
+        const containerWidth = container?.clientWidth || 1000;
+        const containerHeight = container?.clientHeight || 700;
+        
+        // Default position: top-right
+        let top = 24;
+        let right = padding;
+        
+        // Adjust if panel would overflow
+        if (panelWidth + padding * 2 > containerWidth) {
+          right = padding;
+        }
+        
+        if (panelMaxHeight + top + padding > containerHeight) {
+          top = Math.max(padding, containerHeight - panelMaxHeight - padding);
+        }
+        
+        return (
+        <div style={{ 
+          position: 'absolute', 
+          top: `${top}px`, 
+          right: `${right}px`, 
+          background: '#F5F5DC', 
+          border: `2px solid #BDB4D3`, 
+          padding: '20px', 
+          borderRadius: '12px', 
+          boxShadow: '0 3px 12px rgba(189, 180, 211, 0.25)', 
+          width: `${Math.min(panelWidth, containerWidth - padding * 2)}px`, 
+          maxHeight: `${Math.min(panelMaxHeight, containerHeight - top - padding)}px`, 
+          overflowY: 'auto', 
+          fontFamily: '"Lora", "Merriweather", "Georgia", serif',
+          zIndex: 1001
+        }}>
           <h3 style={{ margin: '0 0 16px 0', color: '#5D4037', fontSize: '16px', fontWeight: '600', lineHeight: '1.4' }}>{selectedNode.title}</h3>
           <div style={{ marginTop: '16px', display: 'flex', justifyContent: 'flex-end', gap: '8px' }}>
             <button onClick={() => { setEditNodeData({...selectedNode}); setIsEditingNode(true); }} className="bg-[#BDB4D3] hover:brightness-105 transition-all duration-200" style={{ padding: '8px 16px', color: '#F5F5DC', border: 'none', borderRadius: '8px', cursor: 'pointer', fontSize: '12px', fontWeight: '500', fontFamily: '"Inter", "Lato", sans-serif', backgroundColor: '#BDB4D3' }}>Edit</button>
@@ -652,7 +1200,8 @@ const GraphVisualization: React.FC<GraphVisualizationProps> = ({
             <p style={{ marginBottom: '0', color: '#5D4037' }}><span style={{ fontWeight: '600', color: '#707C5D' }}>tags(didn't work currently):</span> {selectedNode.tags?.join(', ') || 'no tags'}</p>
           </div>
         </div>
-      )}
+        );
+      })()}
 
       {isEditingNode && editNodeData && (
         <div style={{ position: 'absolute', top: '16px', right: '16px', background: '#F5F5DC', border: `2px solid #BDB4D3`, padding: '20px', borderRadius: '12px', boxShadow: '0 3px 12px rgba(189, 180, 211, 0.25)', width: '340px', maxHeight: '500px', overflowY: 'auto', fontFamily: '"Lora", "Merriweather", "Georgia", serif' }}>
@@ -694,8 +1243,44 @@ const GraphVisualization: React.FC<GraphVisualizationProps> = ({
         </div>
       )}
 
-      {selectedEdge && !isEditingEdge && (
-        <div style={{ position: 'absolute', top: '320px', right: '16px', background: '#F5F5DC', border: `2px solid #BDB4D3`, padding: '20px', borderRadius: '12px', boxShadow: '0 3px 12px rgba(189, 180, 211, 0.25)', maxHeight: '400px', width: '500px', fontFamily: '"Lora", "Merriweather", "Georgia", serif' }}>
+      {selectedEdge && !isEditingEdge && (() => {
+        // Calculate position to keep panel within bounds
+        const panelWidth = 500;
+        const panelMaxHeight = 400;
+        const padding = 16;
+        const container = svgRef.current?.parentElement;
+        const containerWidth = container?.clientWidth || 1000;
+        const containerHeight = container?.clientHeight || 700;
+        
+        // Position below node panel or at top if no node panel
+        let top = selectedNode ? 320 : 24;
+        let right = padding;
+        
+        // Adjust if panel would overflow
+        if (panelWidth + padding * 2 > containerWidth) {
+          right = padding;
+        }
+        
+        if (top + panelMaxHeight + padding > containerHeight) {
+          top = Math.max(padding, containerHeight - panelMaxHeight - padding);
+        }
+        
+        return (
+        <div style={{ 
+          position: 'absolute', 
+          top: `${top}px`, 
+          right: `${right}px`, 
+          background: '#F5F5DC', 
+          border: `2px solid #BDB4D3`, 
+          padding: '20px', 
+          borderRadius: '12px', 
+          boxShadow: '0 3px 12px rgba(189, 180, 211, 0.25)', 
+          maxHeight: `${Math.min(panelMaxHeight, containerHeight - top - padding)}px`, 
+          width: `${Math.min(panelWidth, containerWidth - padding * 2)}px`, 
+          overflowY: 'auto',
+          fontFamily: '"Lora", "Merriweather", "Georgia", serif',
+          zIndex: 1001
+        }}>
           <h4 style={{ margin: '0 0 16px 0', color: '#5D4037', fontSize: '16px', fontWeight: '600' }}>relation info</h4>
           <div style={{ fontSize: '13px', lineHeight: '1.5' }}>
             <p style={{ marginBottom: '8px', color: '#5D4037' }}><span style={{ fontWeight: '600', color: '#707C5D' }}>relation:</span> {selectedEdge.relationship}</p>
@@ -708,7 +1293,8 @@ const GraphVisualization: React.FC<GraphVisualizationProps> = ({
             </div>
           </div>
         </div>
-      )}
+        );
+      })()}
 
       {isEditingEdge && editEdgeData && (
         <div style={{ position: 'absolute', top: '320px', right: '16px', background: '#F5F5DC', border: `2px solid #BDB4D3`, padding: '20px', borderRadius: '12px', maxHeight: '400px', boxShadow: '0 3px 12px rgba(189, 180, 211, 0.25)', width: '340px', fontFamily: '"Lora", "Merriweather", "Georgia", serif' }}>

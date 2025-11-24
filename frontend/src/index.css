@@ -75,3 +75,37 @@ button:focus-visible {
   margin: 0;
   padding: 0;
 }
+
+/* Professional Academic Scrollbar Styling */
+@layer utilities {
+  /* Thin scrollbar with academic color scheme */
+  .scrollbar-academic::-webkit-scrollbar {
+    width: 8px;
+    height: 8px;
+  }
+
+  .scrollbar-academic::-webkit-scrollbar-track {
+    background: transparent;
+    border-radius: 4px;
+  }
+
+  .scrollbar-academic::-webkit-scrollbar-thumb {
+    background: rgba(189, 180, 211, 0.4);
+    border-radius: 4px;
+    transition: background 0.2s ease;
+  }
+
+  .scrollbar-academic::-webkit-scrollbar-thumb:hover {
+    background: rgba(189, 180, 211, 0.7);
+  }
+
+  /* Firefox scrollbar styling */
+  .scrollbar-academic {
+    scrollbar-width: thin;
+    scrollbar-color: rgba(189, 180, 211, 0.4) transparent;
+  }
+
+  .scrollbar-academic:hover {
+    scrollbar-color: rgba(189, 180, 211, 0.7) transparent;
+  }
+}
