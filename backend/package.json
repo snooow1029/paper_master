@@ -6,10 +6,12 @@
   "scripts": {
     "dev": "nodemon src/index.ts",
     "build": "tsc",
+    "prestart": "node scripts/verify-pg.js",
     "start": "node dist/index.js",
+    "start:server": "node dist/start-server.js",
     "lint": "eslint src/**/*.ts",
     "test": "jest",
-    "postinstall": "npm list pg || npm install pg@^8.16.3"
+    "postinstall": "npm list pg 2>/dev/null || npm install pg@^8.16.3 --save"
   },
   "dependencies": {
     "@google/generative-ai": "^0.21.0",
