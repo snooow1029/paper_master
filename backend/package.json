@@ -6,9 +6,12 @@
   "scripts": {
     "dev": "nodemon src/index.ts",
     "build": "tsc",
+    "prestart": "node -e \"try { require('pg'); console.log('✅ pg package is installed'); } catch(e) { console.error('❌ pg not found, installing...'); require('child_process').execSync('npm install pg@^8.16.3 --save', {stdio:'inherit'}); }\"",
     "start": "node dist/index.js",
+    "start:server": "node dist/start-server.js",
     "lint": "eslint src/**/*.ts",
-    "test": "jest"
+    "test": "jest",
+    "postinstall": "npm list pg 2>/dev/null || npm install pg@^8.16.3 --save"
   },
   "dependencies": {
     "@google/generative-ai": "^0.21.0",

@@ -14,6 +14,8 @@ export interface PaperMetadata {
   year: string;
   abstract?: string;
   venue?: string;
+  url?: string; // 新增：論文 URL
+  arxivId?: string; // 新增：arXiv ID
   citationCount?: number; // 新增：引用次數
   paperCitationCount?: number; // 直接的 paperCitationCount 字段
   citations: Array<{
@@ -44,6 +46,8 @@ export interface PaperGraph {
     year: string;
     abstract?: string;
     venue?: string;
+    url?: string; // 新增：論文 URL
+    arxivId?: string; // 新增：arXiv ID
     category?: string;
     citationCount?: number; // 新增：引用次數
     paperCitationCount?: number; // 新增：直接的 paperCitationCount 字段
@@ -298,6 +302,8 @@ export class PaperRelationshipAnalyzer {
       year: paper.year,
       abstract: paper.abstract,
       venue: paper.venue,
+      url: paper.url, // 新增：論文 URL
+      arxivId: paper.arxivId, // 新增：arXiv ID
       citationCount: paper.citationCount, // 新增：引用次數
       paperCitationCount: paper.paperCitationCount, // 新增：直接的 paperCitationCount 字段
     }));

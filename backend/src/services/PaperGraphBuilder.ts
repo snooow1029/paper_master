@@ -148,6 +148,10 @@ export class PaperGraphBuilder {
         }
       }
 
+      // 提取 arXiv ID
+      const arxivIdMatch = url.match(/arxiv\.org\/(?:abs|pdf)\/([^\/\?]+)/i);
+      const arxivId = arxivIdMatch ? arxivIdMatch[1].replace(/\.pdf$/, '') : undefined;
+
       // 構建 PaperMetadata
       const paperMetadata = {
         id,
@@ -156,6 +160,8 @@ export class PaperGraphBuilder {
         year: citationResult.paperYear || this.extractYearFromUrl(url) || 'Unknown',
         abstract: finalAbstract,
         venue: citationResult.paperVenue,
+        url: url, // 保存原始 URL
+        arxivId: arxivId, // 保存 arXiv ID
         citationCount: citationResult.paperCitationCount, // 新增：引用次數
         paperCitationCount: citationResult.paperCitationCount, // 直接使用 paperCitationCount
         citations: citationResult.citations
@@ -164,6 +170,8 @@ export class PaperGraphBuilder {
       console.log(`🔍 [PAPER GRAPH DEBUG] Created PaperMetadata with:`, {
         id,
         title: title?.substring(0, 50) + '...',
+        url: url,
+        arxivId: arxivId,
         citationCount: citationResult.paperCitationCount,
         paperCitationCount: citationResult.paperCitationCount
       });
@@ -298,6 +306,10 @@ export class PaperGraphBuilder {
         }
       }
 
+      // 提取 arXiv ID
+      const arxivIdMatch = url.match(/arxiv\.org\/(?:abs|pdf)\/([^\/\?]+)/i);
+      const arxivId = arxivIdMatch ? arxivIdMatch[1].replace(/\.pdf$/, '') : undefined;
+
       // 構建 PaperMetadata
       const paperMetadata = {
         id,
@@ -306,6 +318,8 @@ export class PaperGraphBuilder {
         year: citationResult.paperYear || this.extractYearFromUrl(url) || 'Unknown',
         abstract: finalAbstract,
         venue: citationResult.paperVenue,
+        url: url, // 保存原始 URL
+        arxivId: arxivId, // 保存 arXiv ID
         citationCount: citationResult.paperCitationCount, // 新增：引用次數
         paperCitationCount: citationResult.paperCitationCount, // 直接使用 paperCitationCount
         citations: citationResult.citations
@@ -314,6 +328,8 @@ export class PaperGraphBuilder {
       console.log(`🔍 [PAPER GRAPH FILTERED DEBUG] Created PaperMetadata with:`, {
         id,
         title: title?.substring(0, 50) + '...',
+        url: url,
+        arxivId: arxivId,
         citationCount: citationResult.paperCitationCount,
         paperCitationCount: citationResult.paperCitationCount
       });

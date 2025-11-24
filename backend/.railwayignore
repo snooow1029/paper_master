@@ -1,0 +1,3 @@
+# Railway ignore file - ensure all dependencies are installed
+# This file ensures Railway doesn't skip any dependencies
+

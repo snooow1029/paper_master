@@ -151,28 +151,65 @@ router.get('/test-sample-papers', async (req, res) => {
 
 /**
  * Extract citations with context from a paper
+ * Supports both filtered and unfiltered extraction
  */
 router.post('/extract-citations', async (req, res) => {
   try {
-    const { arxivUrl } = req.body;
+    const { url, arxivUrl, filterSections } = req.body;
     
-    if (!arxivUrl) {
+    // Support both 'url' and 'arxivUrl' parameter names
+    const paperUrl = url || arxivUrl;
+    
+    if (!paperUrl) {
       return res.status(400).json({
         success: false,
-        error: 'arXiv URL is required'
+        error: 'Paper URL is required (use "url" or "arxivUrl" parameter)'
       });
     }
 
     console.log(`\n=== Citation Extraction Request ===`);
-    console.log(`URL: ${arxivUrl}`);
+    console.log(`URL: ${paperUrl}`);
+    console.log(`Filter sections: ${filterSections || false}`);
 
-    const result = await grobidService.extractCitationsWithContext(arxivUrl);
+    // Use filtered extraction if filterSections is enabled
+    let result;
+    if (filterSections) {
+      result = await grobidService.extractCitationsWithContextFiltered(paperUrl);
+    } else {
+      result = await grobidService.extractCitationsWithContext(paperUrl);
+    }
     
-    res.json(result);
+    if (!result.success) {
+      return res.status(500).json({
+        success: false,
+        citations: [],
+        error: result.error || 'Failed to extract citations'
+      });
+    }
+    
+    // Build response based on the method used
+    const response: any = {
+      success: true,
+      citations: result.citations || [],
+      paperTitle: result.paperTitle,
+      count: result.citations?.length || 0
+    };
+    
+    // Add additional fields if available (from filtered extraction)
+    if (filterSections && 'paperAuthors' in result) {
+      response.paperAuthors = (result as any).paperAuthors;
+      response.paperYear = (result as any).paperYear;
+      response.paperAbstract = (result as any).paperAbstract;
+      response.totalSections = (result as any).totalSections;
+      response.filteredSections = (result as any).filteredSections;
+    }
+    
+    res.json(response);
     
   } catch (error) {
     const errorMessage = error instanceof Error ? error.message : 'Unknown error';
     console.error('Citation extraction endpoint error:', errorMessage);
+    console.error('Error stack:', error instanceof Error ? error.stack : 'No stack trace');
     res.status(500).json({ 
       success: false, 
       citations: [],
