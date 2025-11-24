@@ -468,8 +468,6 @@ const GraphVisualization: React.FC<GraphVisualizationProps> = ({
 
     // Calculate optimal link distance based on graph size (using filtered data)
     const nodeCount = filteredNodes.length;
-    const edgeCount = filteredEdges.length;
-    const avgDegree = edgeCount / nodeCount;
     
     // Adaptive distance: larger graphs need more space
     const baseDistance = Math.max(150, Math.min(250, 100 + nodeCount * 2));
@@ -492,9 +490,10 @@ const GraphVisualization: React.FC<GraphVisualizationProps> = ({
           return (d.strength || 0.5) * 0.5;
         }))
       .force('charge', d3.forceManyBody()
-        .strength((d: Node) => {
+        .strength((d) => {
           // Source nodes have less repulsion (stay closer to center)
-          if (isSourceNode(d.id)) {
+          const node = d as Node;
+          if (isSourceNode(node.id)) {
             return chargeStrength * 0.7;
           }
           return chargeStrength;
@@ -503,13 +502,14 @@ const GraphVisualization: React.FC<GraphVisualizationProps> = ({
         .distanceMax(Math.min(graphWidth, graphHeight) * 0.6))
       .force('center', d3.forceCenter(centerX, centerY).strength(0.05))
       .force('collision', d3.forceCollide()
-        .radius((d: Node) => {
+        .radius((d) => {
           // Larger radius for source nodes and nodes with more citations
+          const node = d as Node;
           const baseRadius = 35;
-          if (isSourceNode(d.id)) {
+          if (isSourceNode(node.id)) {
             return baseRadius + 6;
           }
-          const citationCount = d.citationCount || 0;
+          const citationCount = node.citationCount || 0;
           return baseRadius + Math.min(citationCount / 50, 5); // Slightly larger for highly cited papers
         })
         .strength(0.85))
@@ -801,7 +801,12 @@ const GraphVisualization: React.FC<GraphVisualizationProps> = ({
         });
       });
 
-    const yearLabels = g.selectAll('.year-label').data(filteredNodes).enter().append('text')
+    const yearLabels = g.selectAll('.year-label')
+      .data(filteredNodes, (d: any) => d.id);
+    
+    yearLabels.exit().remove();
+    
+    const yearLabelsEnter = yearLabels.enter().append('text')
       .attr('class', 'year-label')
       .attr('dx', 32)
       .attr('dy', 14)
@@ -810,8 +815,10 @@ const GraphVisualization: React.FC<GraphVisualizationProps> = ({
       .style('font-weight', '400')
       .style('fill', '#B89B74')
       .style('opacity', '0.75')
-      .style('cursor', 'pointer')
-      .text((d) => {
+      .style('cursor', 'pointer');
+    
+    const yearLabelsUpdate = yearLabelsEnter.merge(yearLabels as any);
+    yearLabelsUpdate.text((d) => {
         if (!d.year) return '';
         if (d.year.includes('-')) {
           const parts = d.year.split('-');

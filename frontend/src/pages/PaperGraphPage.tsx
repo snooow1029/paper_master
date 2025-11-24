@@ -44,18 +44,18 @@ const PaperGraphPage: React.FC = () => {
   // Core state
   const [graphData, setGraphData] = useState<GraphData | null>(null);
   const [isLoading, setIsLoading] = useState(false);
-  const [error, setError] = useState<string | null>(null);
+  const [_error, setError] = useState<string | null>(null);
   
   // 保存用户输入的原始论文 URLs（用于 Prior/Derivative Works）
-  const [originalPaperUrls, setOriginalPaperUrls] = useState<string[]>([]);
+  const [_originalPaperUrls, setOriginalPaperUrls] = useState<string[]>([]);
   
   // 多模式切换状态（类似 Connected Papers）
   type ViewMode = 'graph' | 'prior-works' | 'derivative-works';
   const [viewMode, setViewMode] = useState<ViewMode>('graph');
   
   // Prior Works 和 Derivative Works 数据（从分析结果中获取）
-  const [priorWorksData, setPriorWorksData] = useState<Record<string, any[]>>({});
-  const [derivativeWorksData, setDerivativeWorksData] = useState<Record<string, any[]>>({});
+  const [_priorWorksData, setPriorWorksData] = useState<Record<string, any[]>>({});
+  const [_derivativeWorksData, setDerivativeWorksData] = useState<Record<string, any[]>>({});
   
   // 合并后的 Prior/Derivative Works 列表（所有原始论文的合并）
   const [allPriorWorks, setAllPriorWorks] = useState<any[]>([]);
@@ -379,7 +379,6 @@ const PaperGraphPage: React.FC = () => {
           // Strength 应该基于该 derivative work 的重要性，而不是它在 graph 中的连接情况
           const derivativeWorksWithStrength = Array.from(mergedDerivativeWorks.values()).map((work: any, index: number) => {
             const workId = work.id;
-            const workTitle = (work.title || '').toLowerCase();
             
             // 在图中查找匹配的节点（通过 ID 或标题相似度匹配），用于获取 citationCount
             const matchingNodes = result.graphData.nodes.filter((node: any) => {
