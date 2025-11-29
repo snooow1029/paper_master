@@ -10,8 +10,8 @@
   line-height: 1.5;
   font-weight: 400;
   
-  /* 覆蓋預設配色，使用森林綠主題 */
-  color-scheme: light;
+  /* Obsidian 深色主題 */
+  color-scheme: dark;
   color: var(--text-primary);
   background-color: var(--bg-primary);
 
@@ -23,11 +23,12 @@
 
 a {
   font-weight: 500;
-  color: var(--green-600);
+  color: var(--green-500);
   text-decoration: inherit;
+  transition: color 0.2s ease;
 }
 a:hover {
-  color: var(--green-700);
+  color: var(--green-600);
 }
 
 body {
@@ -56,15 +57,17 @@ button {
   background-color: var(--bg-card);
   color: var(--text-primary);
   cursor: pointer;
-  transition: border-color 0.25s;
+  transition: all 0.2s ease;
 }
 button:hover {
-  border-color: var(--green-400);
-  background-color: var(--green-50);
+  border-color: var(--border-hover);
+  background-color: var(--bg-hover);
+  color: var(--text-accent);
 }
 button:focus,
 button:focus-visible {
-  outline: 4px auto var(--green-200);
+  outline: 2px solid var(--green-500);
+  outline-offset: 2px;
 }
 
 /* 移除深色模式，使用統一的森林綠主題 */
@@ -90,22 +93,22 @@ button:focus-visible {
   }
 
   .scrollbar-academic::-webkit-scrollbar-thumb {
-    background: rgba(189, 180, 211, 0.4);
+    background: rgba(100, 200, 100, 0.3);
     border-radius: 4px;
     transition: background 0.2s ease;
   }
 
   .scrollbar-academic::-webkit-scrollbar-thumb:hover {
-    background: rgba(189, 180, 211, 0.7);
+    background: rgba(100, 200, 100, 0.6);
   }
 
   /* Firefox scrollbar styling */
   .scrollbar-academic {
     scrollbar-width: thin;
-    scrollbar-color: rgba(189, 180, 211, 0.4) transparent;
+    scrollbar-color: rgba(100, 200, 100, 0.3) transparent;
   }
 
   .scrollbar-academic:hover {
-    scrollbar-color: rgba(189, 180, 211, 0.7) transparent;
+    scrollbar-color: rgba(100, 200, 100, 0.6) transparent;
   }
 }

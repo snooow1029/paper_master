@@ -18,6 +18,7 @@ export interface Task<T = any> {
   type: string;
   status: TaskStatus;
   progress: number; // 0-100
+  progressInfo?: ProgressUpdate; // Structured progress information
   data?: T;
   error?: string;
   createdAt: Date;
@@ -26,8 +27,16 @@ export interface Task<T = any> {
   metadata?: Record<string, any>;
 }
 
+export interface ProgressUpdate {
+  progress: number; // 0-100
+  step?: string; // 'initializing' | 'extracting' | 'analyzing' | 'building'
+  currentStep?: string; // Human-readable current step
+  details?: string; // Additional details
+  metadata?: Record<string, any>; // Additional metadata
+}
+
 export interface TaskProcessor<TInput = any, TOutput = any> {
-  (taskId: string, input: TInput, updateProgress: (progress: number) => void): Promise<TOutput>;
+  (taskId: string, input: TInput, updateProgress: (progress: number | ProgressUpdate) => void): Promise<TOutput>;
 }
 
 export class TaskQueueService extends EventEmitter {
@@ -141,8 +150,13 @@ export class TaskQueueService extends EventEmitter {
     task.startedAt = new Date();
     this.emit('task:started', task);
 
-    const updateProgress = (progress: number) => {
-      task.progress = Math.max(0, Math.min(100, progress));
+    const updateProgress = (progress: number | ProgressUpdate) => {
+      if (typeof progress === 'number') {
+        task.progress = Math.max(0, Math.min(100, progress));
+      } else {
+        task.progress = Math.max(0, Math.min(100, progress.progress));
+        task.progressInfo = progress;
+      }
       this.emit('task:progress', task);
     };
 

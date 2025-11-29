@@ -1,41 +1,45 @@
-/* 森林綠主題配色變數 */
+/* Obsidian 深色主題配色變數 */
 :root {
-  /* 背景色 */
-  --bg-primary: #FFFCF5;      /* 杏仁白 - 主背景 */
-  --bg-soft: #F8F6F0;         /* 更柔和的背景 */
-  --bg-card: #FFFFFF;         /* 卡片背景 */
-  --bg-accent: #F0F9F4;       /* 淺綠背景 */
+  /* 背景色 - Obsidian 深色 */
+  --bg-primary: #1e1e1e;      /* Obsidian 主背景 */
+  --bg-soft: #252525;         /* 稍亮的背景 */
+  --bg-card: #2d2d2d;         /* 卡片背景 */
+  --bg-accent: #1a3a1a;       /* 深綠背景（強調區域） */
+  --bg-hover: #2a2a2a;        /* Hover 背景 */
   
-  /* 文字色 */
-  --text-primary: #312F2F;    /* 深暖灰色 - 主要文字 */
-  --text-secondary: #6B7280;  /* 次要文字 */
-  --text-muted: #9CA3AF;      /* 弱化文字 */
+  /* 文字色 - Obsidian 淺色 */
+  --text-primary: #e8e8e8;    /* 主要文字 - 淺灰白 */
+  --text-secondary: #b8b8b8;  /* 次要文字 */
+  --text-muted: #888888;      /* 弱化文字 */
+  --text-accent: #64c864;     /* 強調文字（綠色） */
   
   /* 邊框色 */
-  --border-primary: #EAE8E1;  /* 米灰色 - 主要邊框 */
-  --border-soft: #F3F1EA;     /* 更柔和的邊框 */
+  --border-primary: rgba(100, 200, 100, 0.2);  /* 淡綠邊框 */
+  --border-soft: rgba(100, 200, 100, 0.1);     /* 更淡的邊框 */
+  --border-hover: rgba(100, 200, 100, 0.4);    /* Hover 邊框 */
   
-  /* 綠色系統 */
-  --green-50: #F0FDF4;        /* 最淺綠 */
-  --green-100: #DCFCE7;       /* 極淺綠 */
-  --green-200: #BBF7D0;       /* 淺綠 */
-  --green-300: #86EFAC;       /* 中淺綠 */
-  --green-400: #4ADE80;       /* 中綠 */
-  --green-500: #22C55E;       /* 亮綠色 */
-  --green-600: #16A34A;       /* 森林綠 - 主色調 */
-  --green-700: #15803D;       /* 深綠 */
-  --green-800: #166534;       /* 深森林綠 */
-  --green-900: #14532D;       /* 最深綠 */
+  /* 綠色系統 - Obsidian 風格 */
+  --green-50: #0d2e0d;        /* 最深綠 */
+  --green-100: #1a3a1a;       /* 深綠 */
+  --green-200: #2a4a2a;       /* 中深綠 */
+  --green-300: #3a5a3a;       /* 中綠 */
+  --green-400: #4a7a4a;       /* 中亮綠 */
+  --green-500: #64c864;       /* Obsidian 主綠色 */
+  --green-600: #4ade80;       /* 亮綠色 */
+  --green-700: #22c55e;       /* 更亮綠 */
+  --green-800: #16a34a;       /* 標準綠 */
+  --green-900: #15803d;       /* 深標準綠 */
   
   /* 功能色 */
-  --success: #22C55E;         /* 成功綠 */
-  --error: #DC2626;           /* 錯誤紅 */
-  --warning: #F59E0B;         /* 警告黃 */
+  --success: #64c864;         /* 成功綠 */
+  --error: #dc4444;           /* 錯誤紅（深色主題適配） */
+  --warning: #f5a623;         /* 警告黃（深色主題適配） */
   
-  /* 陰影 */
-  --shadow-sm: 0 1px 2px rgba(21, 128, 61, 0.05);
-  --shadow-md: 0 4px 6px rgba(21, 128, 61, 0.07);
-  --shadow-lg: 0 10px 15px rgba(21, 128, 61, 0.1);
+  /* 陰影 - 深色主題 */
+  --shadow-sm: 0 1px 2px rgba(0, 0, 0, 0.3);
+  --shadow-md: 0 4px 6px rgba(0, 0, 0, 0.4);
+  --shadow-lg: 0 10px 15px rgba(0, 0, 0, 0.5);
+  --shadow-glow: 0 0 10px rgba(100, 200, 100, 0.3); /* 綠色光暈 */
 }
 
 /* 全域樣式調整 */
@@ -44,33 +48,37 @@ body {
   color: var(--text-primary);
 }
 
-/* 按鈕樣式 */
+/* 按鈕樣式 - Obsidian 風格 */
 .btn-primary {
-  background-color: var(--green-600);
-  color: white;
-  border: none;
+  background-color: var(--green-500);
+  color: var(--text-primary);
+  border: 1px solid var(--border-primary);
   border-radius: 8px;
   padding: 8px 16px;
   transition: all 0.2s ease;
+  box-shadow: var(--shadow-sm);
 }
 
 .btn-primary:hover {
-  background-color: var(--green-700);
+  background-color: var(--green-600);
+  border-color: var(--border-hover);
+  box-shadow: var(--shadow-glow);
   transform: translateY(-1px);
 }
 
 .btn-secondary {
-  background-color: var(--green-100);
-  color: var(--green-800);
-  border: 1px solid var(--green-300);
+  background-color: var(--bg-card);
+  color: var(--text-primary);
+  border: 1px solid var(--border-primary);
   border-radius: 8px;
   padding: 8px 16px;
   transition: all 0.2s ease;
 }
 
 .btn-secondary:hover {
-  background-color: var(--green-200);
-  border-color: var(--green-400);
+  background-color: var(--bg-hover);
+  border-color: var(--border-hover);
+  color: var(--text-accent);
 }
 
 .btn-success {
@@ -83,20 +91,23 @@ body {
   color: white;
 }
 
-/* 卡片樣式 */
+/* 卡片樣式 - Obsidian 風格 */
 .card {
   background-color: var(--bg-card);
   border: 1px solid var(--border-primary);
   border-radius: 12px;
   box-shadow: var(--shadow-sm);
   transition: all 0.2s ease;
+  color: var(--text-primary);
 }
 
 .card:hover {
   box-shadow: var(--shadow-md);
+  border-color: var(--border-hover);
+  background-color: var(--bg-hover);
 }
 
-/* 表單樣式 */
+/* 表單樣式 - Obsidian 風格 */
 .form-input {
   background-color: var(--bg-soft);
   border: 1px solid var(--border-primary);
@@ -106,8 +117,13 @@ body {
   transition: all 0.2s ease;
 }
 
+.form-input::placeholder {
+  color: var(--text-muted);
+}
+
 .form-input:focus {
   outline: none;
-  border-color: var(--green-400);
-  box-shadow: 0 0 0 3px rgba(34, 197, 94, 0.1);
+  border-color: var(--green-500);
+  box-shadow: 0 0 0 2px rgba(100, 200, 100, 0.2);
+  background-color: var(--bg-card);
 }

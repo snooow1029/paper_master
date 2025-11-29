@@ -35,13 +35,20 @@ export class PaperGraphBuilder {
   /**
    * 從多個論文 URL 構建關係圖
    */
-  async buildGraphFromUrls(paperUrls: string[]): Promise<GraphBuildResult> {
+  async buildGraphFromUrls(paperUrls: string[], progressCallback?: (update: { progress: number; step: string; currentStep: string; details?: string }) => void): Promise<GraphBuildResult> {
     const startTime = Date.now();
     
     try {
       console.log(`\n=== Building Paper Graph from ${paperUrls.length} URLs ===`);
 
       // 1. 檢查服務可用性
+      progressCallback?.({
+        progress: 10,
+        step: 'initializing',
+        currentStep: 'Checking services...',
+        details: 'Verifying GROBID and LLM availability'
+      });
+      
       const servicesReady = await this.checkServicesPrivate();
       if (!servicesReady.grobid || !servicesReady.llm) {
         return {
@@ -53,15 +60,33 @@ export class PaperGraphBuilder {
       // 2. 使用 GROBID 提取每篇論文的數據
       console.log('\n--- Step 1: Extracting Paper Data with GROBID ---');
       const papers: PaperMetadata[] = [];
+      const extractionStartProgress = 15;
+      const extractionEndProgress = 50;
+      const progressPerPaper = (extractionEndProgress - extractionStartProgress) / paperUrls.length;
       
       for (let i = 0; i < paperUrls.length; i++) {
         const url = paperUrls[i];
+        const currentProgress = extractionStartProgress + (i * progressPerPaper);
+        
+        progressCallback?.({
+          progress: currentProgress,
+          step: 'extracting',
+          currentStep: `Processing paper ${i + 1}/${paperUrls.length}`,
+          details: `Extracting metadata from ${url}`
+        });
+        
         console.log(`Processing paper ${i + 1}/${paperUrls.length}: ${url}`);
         
         const paperData = await this.extractPaperData(url);
         if (paperData) {
           papers.push(paperData);
           console.log(`✅ Extracted: ${paperData.title}`);
+          progressCallback?.({
+            progress: currentProgress + (progressPerPaper * 0.8),
+            step: 'extracting',
+            currentStep: `Extracted: ${paperData.title.substring(0, 50)}...`,
+            details: `Successfully processed paper ${i + 1}/${paperUrls.length}`
+          });
         } else {
           console.log(`❌ Failed to extract data from: ${url}`);
         }
@@ -75,13 +100,41 @@ export class PaperGraphBuilder {
       }
 
       // 3. 使用 LLM 分析論文關係
+      progressCallback?.({
+        progress: 55,
+        step: 'analyzing',
+        currentStep: 'Analyzing relationships...',
+        details: 'Using LLM to identify paper relationships'
+      });
+      
       console.log('\n--- Step 2: Analyzing Relationships with LLM ---');
       
       // 將引用轉換為額外的論文節點（深度1表示只提取一層引用）
-      const allPapers = await this.expandPapersWithCitations(papers, 1);
+      progressCallback?.({
+        progress: 60,
+        step: 'analyzing',
+        currentStep: 'Expanding citation network...',
+        details: 'Extracting cited papers'
+      });
+      
+      const allPapers = await this.expandPapersWithCitations(papers, 1, progressCallback);
       console.log(`Expanded to ${allPapers.length} total papers (including ${allPapers.length - papers.length} cited papers)`);
       
+      progressCallback?.({
+        progress: 70,
+        step: 'analyzing',
+        currentStep: 'Analyzing paper pairs...',
+        details: `Analyzing relationships between ${allPapers.length} papers`
+      });
+      
       const graph = await this.relationshipAnalyzer.buildRelationshipGraph(allPapers);
+      
+      progressCallback?.({
+        progress: 85,
+        step: 'building',
+        currentStep: 'Building graph structure...',
+        details: `Created ${graph.nodes.length} nodes and ${graph.edges.length} relationships`
+      });
 
       const processingTime = Date.now() - startTime;
 
@@ -187,13 +240,20 @@ export class PaperGraphBuilder {
   /**
    * 使用篩選後的引用提取構建關係圖（只從 Introduction/Related Work 部分）
    */
-  async buildGraphWithFilteredCitations(paperUrls: string[], expansionDepth: number = 0): Promise<GraphBuildResult> {
+  async buildGraphWithFilteredCitations(paperUrls: string[], expansionDepth: number = 0, progressCallback?: (update: { progress: number; step: string; currentStep: string; details?: string }) => void): Promise<GraphBuildResult> {
     const startTime = Date.now();
     
     try {
       console.log(`\n=== Building Paper Graph with Filtered Citations from ${paperUrls.length} URLs (depth: ${expansionDepth}) ===`);
 
       // 1. 檢查服務可用性
+      progressCallback?.({
+        progress: 10,
+        step: 'initializing',
+        currentStep: 'Checking services...',
+        details: 'Verifying GROBID and LLM availability'
+      });
+      
       const servicesReady = await this.checkServicesPrivate();
       if (!servicesReady.grobid || !servicesReady.llm) {
         return {
@@ -205,11 +265,30 @@ export class PaperGraphBuilder {
       // 2. 提取論文數據（使用篩選後的引用）
       console.log('\n📋 Extracting paper data with filtered citations...');
       const papers: PaperMetadata[] = [];
+      const extractionStartProgress = 15;
+      const extractionEndProgress = 50;
+      const progressPerPaper = (extractionEndProgress - extractionStartProgress) / paperUrls.length;
       
-      for (const url of paperUrls) {
+      for (let i = 0; i < paperUrls.length; i++) {
+        const url = paperUrls[i];
+        const currentProgress = extractionStartProgress + (i * progressPerPaper);
+        
+        progressCallback?.({
+          progress: currentProgress,
+          step: 'extracting',
+          currentStep: `Processing paper ${i + 1}/${paperUrls.length} (filtered)`,
+          details: `Extracting citations from key sections: ${url}`
+        });
+        
         const paperData = await this.extractPaperDataFiltered(url);
         if (paperData) {
           papers.push(paperData);
+          progressCallback?.({
+            progress: currentProgress + (progressPerPaper * 0.8),
+            step: 'extracting',
+            currentStep: `Extracted: ${paperData.title.substring(0, 50)}...`,
+            details: `Successfully processed paper ${i + 1}/${paperUrls.length}`
+          });
         }
       }
 
@@ -226,13 +305,41 @@ export class PaperGraphBuilder {
       let allPapers = papers;
       if (expansionDepth > 0) {
         console.log(`\n🕸️  Starting network expansion analysis (depth: ${expansionDepth})`);
-        allPapers = await this.expandPapersWithCitations(papers, expansionDepth);
+        progressCallback?.({
+          progress: 50,
+          step: 'extracting',
+          currentStep: 'Starting citation network expansion...',
+          details: `Expanding network to depth ${expansionDepth} (this may take a while)`
+        });
+        allPapers = await this.expandPapersWithCitations(papers, expansionDepth, progressCallback);
         console.log(`📈 Expanded from ${papers.length} to ${allPapers.length} papers through citation network`);
       }
 
       // 3. 分析論文關係
+      progressCallback?.({
+        progress: 55,
+        step: 'analyzing',
+        currentStep: 'Analyzing relationships...',
+        details: 'Using LLM to identify paper relationships'
+      });
+      
       console.log('\n🔍 Analyzing paper relationships...');
+      
+      progressCallback?.({
+        progress: 70,
+        step: 'analyzing',
+        currentStep: 'Analyzing paper pairs...',
+        details: `Analyzing relationships between ${allPapers.length} papers`
+      });
+      
       const graph = await this.relationshipAnalyzer.buildRelationshipGraph(allPapers);
+      
+      progressCallback?.({
+        progress: 85,
+        step: 'building',
+        currentStep: 'Building graph structure...',
+        details: `Created ${graph.nodes.length} nodes and ${graph.edges.length} relationships`
+      });
       
       const processingTime = Date.now() - startTime;
       
@@ -363,7 +470,11 @@ export class PaperGraphBuilder {
    * 將引用轉換為額外的論文節點，擴展論文列表（支持深度提取）
    * 改進版：確保引用論文也通過GROBID處理，避免重複，建立完整的引用網絡
    */
-  private async expandPapersWithCitations(mainPapers: PaperMetadata[], depth: number = 1): Promise<PaperMetadata[]> {
+  private async expandPapersWithCitations(
+    mainPapers: PaperMetadata[], 
+    depth: number = 1,
+    progressCallback?: (update: { progress: number; step: string; currentStep: string; details?: string }) => void
+  ): Promise<PaperMetadata[]> {
     const allPapers: PaperMetadata[] = [...mainPapers];
     const processedPaperIds = new Set<string>();
     const processedUrls = new Set<string>();
@@ -381,6 +492,15 @@ export class PaperGraphBuilder {
     // 使用隊列來處理層級遞歸
     const papersToProcess = [...mainPapers];
     let currentDepth = 0;
+    let processedCitations = 0;
+    let totalProcessed = 0;
+
+    progressCallback?.({
+      progress: 50,
+      step: 'extracting',
+      currentStep: 'Expanding citation network...',
+      details: `Starting network expansion to depth ${depth} (this may take a while for large networks)`
+    });
 
     while (currentDepth < depth && papersToProcess.length > 0) {
       currentDepth++;
@@ -388,14 +508,53 @@ export class PaperGraphBuilder {
       papersToProcess.length = 0; // 清空待處理隊列
 
       console.log(`\n📈 Processing depth ${currentDepth}, analyzing ${currentLevelPapers.length} papers`);
+      
+      progressCallback?.({
+        progress: 50 + (currentDepth - 1) * (30 / depth),
+        step: 'extracting',
+        currentStep: `Processing depth ${currentDepth}/${depth}...`,
+        details: `Analyzing ${currentLevelPapers.length} papers at depth ${currentDepth}`
+      });
 
-      for (const paper of currentLevelPapers) {
+      for (let paperIndex = 0; paperIndex < currentLevelPapers.length; paperIndex++) {
+        const paper = currentLevelPapers[paperIndex];
+        
         if (paper.citations && paper.citations.length > 0) {
           console.log(`Processing ${paper.citations.length} citations from: ${paper.title}`);
           
-          for (const citation of paper.citations) {
+          progressCallback?.({
+            progress: 50 + (currentDepth - 1) * (30 / depth) + (paperIndex / currentLevelPapers.length) * (30 / depth),
+            step: 'extracting',
+            currentStep: `Analyzing citations from: ${paper.title.substring(0, 40)}...`,
+            details: `Processing paper ${paperIndex + 1}/${currentLevelPapers.length} at depth ${currentDepth} (${paper.citations.length} citations)`
+          });
+          
+          for (let citationIndex = 0; citationIndex < paper.citations.length; citationIndex++) {
+            const citation = paper.citations[citationIndex];
+            
             // 跳過沒有標題的引用
             if (!citation.title) continue;
+            
+            processedCitations++;
+            totalProcessed++;
+            
+            // 每處理3個引用或每篇論文的最後一個引用時更新進度
+            if (processedCitations % 3 === 0 || citationIndex === paper.citations.length - 1) {
+              const depthProgressStart = 50 + ((currentDepth - 1) / depth) * 30;
+              const depthProgressEnd = 50 + (currentDepth / depth) * 30;
+              const paperProgress = depthProgressStart + 
+                ((paperIndex / currentLevelPapers.length) * (depthProgressEnd - depthProgressStart));
+              const citationProgress = paperProgress + 
+                ((citationIndex + 1) / paper.citations.length) * 
+                ((depthProgressEnd - depthProgressStart) / currentLevelPapers.length);
+              
+              progressCallback?.({
+                progress: Math.min(80, citationProgress),
+                step: 'extracting',
+                currentStep: `Extracting citation: ${citation.title.substring(0, 45)}...`,
+                details: `Processing citation ${totalProcessed} at depth ${currentDepth} (paper ${paperIndex + 1}/${currentLevelPapers.length}, citation ${citationIndex + 1}/${paper.citations.length})`
+              });
+            }
 
             // 生成引用論文的唯一ID
             const citationId = this.generateCitationId(citation);
@@ -457,6 +616,13 @@ export class PaperGraphBuilder {
         }
       }
     }
+    
+    progressCallback?.({
+      progress: 80,
+      step: 'extracting',
+      currentStep: 'Citation network expansion complete',
+      details: `Expanded from ${mainPapers.length} to ${allPapers.length} papers (${allPapers.length - mainPapers.length} new papers added)`
+    });
 
     console.log(`📊 Expanded from ${mainPapers.length} to ${allPapers.length} papers after ${currentDepth} levels`);
     return allPapers;

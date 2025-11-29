@@ -5,11 +5,13 @@ import { Node, Edge, GraphData } from '../types/graph';
 interface GraphVisualizationProps {
   data?: GraphData;
   onDataUpdate?: (data: GraphData) => void;
+  isLoading?: boolean; // 傳入加載狀態以調整控件位置
 }
 
 const GraphVisualization: React.FC<GraphVisualizationProps> = ({ 
   data: initialData, 
-  onDataUpdate 
+  onDataUpdate,
+  isLoading = false
 }) => {
   const svgRef = useRef<SVGSVGElement>(null);
   const [selectedNode, setSelectedNode] = useState<Node | null>(null);
@@ -316,32 +318,32 @@ const GraphVisualization: React.FC<GraphVisualizationProps> = ({
     
     const defs = svg.append('defs');
     
-  // Update node gradient to semi-transparent lavender purple
+  // Obsidian style node gradient - green theme
     const nodeGradient = defs.append('radialGradient').attr('id', 'nodeGradient').attr('cx', '35%').attr('cy', '35%');
-    nodeGradient.append('stop').attr('offset', '0%').attr('stop-color', '#BDB4D3').attr('stop-opacity', 0.8);
-    nodeGradient.append('stop').attr('offset', '100%').attr('stop-color', '#BDB4D3').attr('stop-opacity', 0.6);
+    nodeGradient.append('stop').attr('offset', '0%').attr('stop-color', '#64c864').attr('stop-opacity', 0.9);
+    nodeGradient.append('stop').attr('offset', '100%').attr('stop-color', '#4ade80').attr('stop-opacity', 0.7);
     
-  // Source node gradient - distinct orange/gold for input papers
+  // Source node gradient - brighter green for input papers
     const sourceNodeGradient = defs.append('radialGradient').attr('id', 'sourceNodeGradient').attr('cx', '35%').attr('cy', '35%');
-    sourceNodeGradient.append('stop').attr('offset', '0%').attr('stop-color', '#F59E0B').attr('stop-opacity', 0.9);
-    sourceNodeGradient.append('stop').attr('offset', '100%').attr('stop-color', '#D97706').attr('stop-opacity', 0.7);
+    sourceNodeGradient.append('stop').attr('offset', '0%').attr('stop-color', '#4ade80').attr('stop-opacity', 1.0);
+    sourceNodeGradient.append('stop').attr('offset', '100%').attr('stop-color', '#22c55e').attr('stop-opacity', 0.8);
     
-  // Dark lavender purple gradient for mouse hover
+  // Node hover gradient - brighter green
     const nodeHoverGradient = defs.append('radialGradient').attr('id', 'nodeHoverGradient').attr('cx', '35%').attr('cy', '35%');
-    nodeHoverGradient.append('stop').attr('offset', '0%').attr('stop-color', '#9F7AEA').attr('stop-opacity', 0.9);
-    nodeHoverGradient.append('stop').attr('offset', '100%').attr('stop-color', '#7C5CE0').attr('stop-opacity', 0.8);
+    nodeHoverGradient.append('stop').attr('offset', '0%').attr('stop-color', '#4ade80').attr('stop-opacity', 1.0);
+    nodeHoverGradient.append('stop').attr('offset', '100%').attr('stop-color', '#22c55e').attr('stop-opacity', 0.9);
     
-  // Source node hover gradient - brighter orange
+  // Source node hover gradient - brightest green
     const sourceNodeHoverGradient = defs.append('radialGradient').attr('id', 'sourceNodeHoverGradient').attr('cx', '35%').attr('cy', '35%');
-    sourceNodeHoverGradient.append('stop').attr('offset', '0%').attr('stop-color', '#FBBF24').attr('stop-opacity', 1.0);
-    sourceNodeHoverGradient.append('stop').attr('offset', '100%').attr('stop-color', '#F59E0B').attr('stop-opacity', 0.9);
+    sourceNodeHoverGradient.append('stop').attr('offset', '0%').attr('stop-color', '#22c55e').attr('stop-opacity', 1.0);
+    sourceNodeHoverGradient.append('stop').attr('offset', '100%').attr('stop-color', '#16a34a').attr('stop-opacity', 0.9);
     
     const dropShadow = defs.append('filter').attr('id', 'dropShadow').attr('x', '-50%').attr('y', '-50%').attr('width', '200%').attr('height', '200%');
-    dropShadow.append('feDropShadow').attr('dx', 1).attr('dy', 2).attr('stdDeviation', 2).attr('flood-color', '#5D4037').attr('flood-opacity', 0.2);
+    dropShadow.append('feDropShadow').attr('dx', 1).attr('dy', 2).attr('stdDeviation', 2).attr('flood-color', '#64c864').attr('flood-opacity', 0.3);
 
     const edgeGradient = defs.append('linearGradient').attr('id', 'edgeGradient');
-    edgeGradient.append('stop').attr('offset', '0%').attr('stop-color', '#B89B74').attr('stop-opacity', 0.8);
-    edgeGradient.append('stop').attr('offset', '100%').attr('stop-color', '#D2CBBF').attr('stop-opacity', 0.6);
+    edgeGradient.append('stop').attr('offset', '0%').attr('stop-color', '#64c864').attr('stop-opacity', 0.6);
+    edgeGradient.append('stop').attr('offset', '100%').attr('stop-color', '#4ade80').attr('stop-opacity', 0.4);
 
     // Create main group with proper transform for margins
     const g = svg.append('g').attr('transform', `translate(${margin.left},${margin.top})`);
@@ -396,7 +398,7 @@ const GraphVisualization: React.FC<GraphVisualizationProps> = ({
     
     // Update links styling
     linksUpdate
-      .attr('stroke', '#D2CBBF')
+      .attr('stroke', 'rgba(100, 200, 100, 0.5)')
       .attr('stroke-width', (d: any) => Math.sqrt(d.strength * 8) + 1)
       .attr('opacity', 0.6)
       .style('cursor', 'pointer');
@@ -406,7 +408,7 @@ const GraphVisualization: React.FC<GraphVisualizationProps> = ({
       .attr('r', 26)
       .attr('fill', (d: Node) => isSourceNode(d.id) ? 'url(#sourceNodeGradient)' : 'url(#nodeGradient)')
       .attr('stroke', (d: Node) => {
-        return selectedNodeIds.has(d.id) ? '#9F7AEA' : '#F5F5DC';
+        return selectedNodeIds.has(d.id) ? '#64c864' : 'rgba(100, 200, 100, 0.4)';
       })
       .attr('stroke-width', (d: Node) => {
         return selectedNodeIds.has(d.id) ? 3 : 2;
@@ -422,7 +424,7 @@ const GraphVisualization: React.FC<GraphVisualizationProps> = ({
         }
         
         // Reset all visual states
-        linksUpdate.attr('stroke', '#D2CBBF').attr('opacity', 0.6).attr('stroke-width', (d: any) => Math.sqrt(d.strength * 8) + 1);
+        linksUpdate.attr('stroke', 'rgba(100, 200, 100, 0.5)').attr('opacity', 0.6).attr('stroke-width', (d: any) => Math.sqrt(d.strength * 8) + 1);
         nodesUpdate
           .attr('r', 26)
           .attr('fill', (d: Node) => isSourceNode(d.id) ? 'url(#sourceNodeGradient)' : 'url(#nodeGradient)')
@@ -558,7 +560,7 @@ const GraphVisualization: React.FC<GraphVisualizationProps> = ({
           .style('stroke', (nodeData: any) => {
             const sourceId = (d.source as Node).id || d.source;
             const targetId = (d.target as Node).id || d.target;
-            return (nodeData.id === sourceId || nodeData.id === targetId) ? '#f7f5f8ff' : '#fff0acff';
+            return (nodeData.id === sourceId || nodeData.id === targetId) ? '#64c864' : 'rgba(100, 200, 100, 0.4)';
           })
           .style('stroke-width', (nodeData: any) => {
             const sourceId = (d.source as Node).id || d.source;
@@ -572,7 +574,7 @@ const GraphVisualization: React.FC<GraphVisualizationProps> = ({
         if (!clickedEdge || clickedEdge !== d) {
           setHoveredEdge(d);
           d3.select(this)
-            .attr('stroke', '#B89B74')
+            .attr('stroke', '#64c864')
             .attr('opacity', 0.8)
             .attr('stroke-width', Math.sqrt(d.strength * 10) + 2);
         }
@@ -582,7 +584,7 @@ const GraphVisualization: React.FC<GraphVisualizationProps> = ({
         if (!clickedEdge || clickedEdge !== d) {
           setHoveredEdge(null);
           d3.select(this)
-            .attr('stroke', '#D2CBBF')
+            .attr('stroke', 'rgba(100, 200, 100, 0.5)')
             .attr('opacity', 0.6)
             .attr('stroke-width', Math.sqrt(d.strength * 8) + 1);
         }
@@ -612,7 +614,7 @@ const GraphVisualization: React.FC<GraphVisualizationProps> = ({
           setSelectedNodeIds(new Set());
           // Restore all nodes and links to initial state
           linksUpdate
-            .attr('stroke', '#D2CBBF')
+            .attr('stroke', 'rgba(100, 200, 100, 0.5)')
             .attr('opacity', 0.6)
             .attr('stroke-width', (linkData: any) => Math.sqrt(linkData.strength * 8) + 1);
           
@@ -702,7 +704,7 @@ const GraphVisualization: React.FC<GraphVisualizationProps> = ({
           d3.select(this)
             .attr('r', 28)
             .attr('fill', isSourceNode(d.id) ? 'url(#sourceNodeHoverGradient)' : 'url(#nodeHoverGradient)')
-            .style('stroke', '#c3a4ffff')
+            .style('stroke', '#64c864')
             .style('stroke-width', 3);
         }
       })
@@ -714,7 +716,7 @@ const GraphVisualization: React.FC<GraphVisualizationProps> = ({
           // Restore links if no node or edge is selected
           if (!selectedNode && !selectedEdge) {
             linksUpdate
-              .attr('stroke', '#D2CBBF')
+              .attr('stroke', 'rgba(100, 200, 100, 0.5)')
               .attr('opacity', 0.6)
               .attr('stroke-width', (linkData: any) => Math.sqrt(linkData.strength * 8) + 1);
           }
@@ -749,7 +751,7 @@ const GraphVisualization: React.FC<GraphVisualizationProps> = ({
       .style('font-size', '12px')
       .style('font-family', '"Lora", "Merriweather", "Georgia", serif')
       .style('font-weight', '400')
-      .style('fill', '#5D4037')
+      .style('fill', '#e8e8e8')
       .style('cursor', 'pointer');
     
     const titleLabelsUpdate = titleLabelsEnter.merge(titleLabels as any);
@@ -765,11 +767,11 @@ const GraphVisualization: React.FC<GraphVisualizationProps> = ({
           .style('font-size', '12px')
           .style('font-family', '"Lora", "Merriweather", "Georgia", serif')
           .style('font-weight', '400')
-          .style('border', `2px solid #BDB4D3`)
+          .style('border', `1px solid rgba(100, 200, 100, 0.3)`)
           .style('border-radius', '6px')
           .style('padding', '3px 6px')
-          .style('background-color', '#F5F5DC')
-          .style('color', '#5D4037');
+          .style('background-color', '#252525')
+          .style('color', '#e8e8e8');
         
         const label = d3.select(event.target as Element);
         label.style('display', 'none');
@@ -813,7 +815,7 @@ const GraphVisualization: React.FC<GraphVisualizationProps> = ({
       .style('font-size', '10px')
       .style('font-family', '"Inter", "Lato", "Segoe UI", "Roboto", sans-serif')
       .style('font-weight', '400')
-      .style('fill', '#B89B74')
+      .style('fill', '#b8b8b8')
       .style('opacity', '0.75')
       .style('cursor', 'pointer');
     
@@ -913,14 +915,14 @@ const GraphVisualization: React.FC<GraphVisualizationProps> = ({
           }
           return isSourceNode(nodeData.id) ? 'url(#sourceNodeGradient)' : 'url(#nodeGradient)';
         })
-        .style('stroke', (nodeData: any) => nodeData.id === selectedNode.id ? '#c3a4ffff' : '#F5F5DC')
+        .style('stroke', (nodeData: any) => nodeData.id === selectedNode.id ? '#64c864' : 'rgba(100, 200, 100, 0.4)')
         .style('stroke-width', (nodeData: any) => nodeData.id === selectedNode.id ? 3 : 2);
     }
     
     // Maintain edge highlighting during editing
     if (isEditingEdge && selectedEdge) {
       links
-        .attr('stroke', (linkData: any) => (linkData === selectedEdge) ? 'url(#edgeGradient)' : '#EAE8E1')
+        .attr('stroke', (linkData: any) => (linkData === selectedEdge) ? 'url(#edgeGradient)' : 'rgba(100, 200, 100, 0.3)')
         .attr('opacity', (linkData: any) => (linkData === selectedEdge) ? 1 : 0.3)
         .attr('stroke-width', (linkData: any) => (linkData === selectedEdge) ? Math.sqrt(linkData.strength * 12) + 6 : Math.sqrt(linkData.strength * 12) + 3);
       
@@ -934,7 +936,7 @@ const GraphVisualization: React.FC<GraphVisualizationProps> = ({
         .style('stroke', (nodeData: any) => {
           const sourceId = (selectedEdge.source as Node).id || selectedEdge.source;
           const targetId = (selectedEdge.target as Node).id || selectedEdge.target;
-          return (nodeData.id === sourceId || nodeData.id === targetId) ? '#f7f5f8ff' : '#fff0acff';
+          return (nodeData.id === sourceId || nodeData.id === targetId) ? '#64c864' : 'rgba(100, 200, 100, 0.4)';
         })
         .style('stroke-width', (nodeData: any) => {
           const sourceId = (selectedEdge.source as Node).id || selectedEdge.source;
@@ -945,74 +947,76 @@ const GraphVisualization: React.FC<GraphVisualizationProps> = ({
   }, [isEditingNode, isEditingEdge, selectedNode, selectedEdge, data]);
 
   return (
-    <div style={{ width: '100%', height: '100%', position: 'relative', backgroundColor: '#F5F5DC', borderRadius: '12px', overflow: 'hidden' }}>
-      {/* Toggle button and controls in top-left */}
+    <div style={{ width: '100%', height: '100%', position: 'relative', backgroundColor: '#1e1e1e', borderRadius: '12px', overflow: 'hidden' }}>
+      {/* Toggle button and controls in top-left - moved down to avoid progress bar */}
       <div style={{ 
         position: 'absolute', 
-        top: '16px', 
+        top: isLoading ? '240px' : '16px',  // 當進度條顯示時，控件位置更低（進度條高度約200px，加上間距）
         left: '16px', 
-        zIndex: 1000,
+        zIndex: isLoading ? 998 : 1000,  // 進度條顯示時，控件 z-index 更低，確保進度條在上方
         display: 'flex',
         flexDirection: 'column',
-        gap: '12px'
+        gap: '12px',
+        transition: 'top 0.3s ease'  // 平滑過渡
       }}>
         {/* Toggle switch for showing/hiding isolated nodes */}
         <div style={{
-          background: '#F5F5DC',
-          border: `2px solid #BDB4D3`,
+          background: '#2d2d2d',
+          border: `1px solid rgba(100, 200, 100, 0.3)`,
           borderRadius: '8px',
           padding: '12px 16px',
-          boxShadow: '0 2px 8px rgba(189, 180, 211, 0.25)',
+          boxShadow: '0 2px 8px rgba(0, 0, 0, 0.3)',
           display: 'flex',
           alignItems: 'center',
           gap: '12px',
-          fontFamily: '"Lora", "Merriweather", "Georgia", serif'
+          fontFamily: '-apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif'
         }}>
           <span style={{ 
             fontSize: '13px', 
-            color: '#5D4037',
+            color: '#e8e8e8',
             fontWeight: '500',
             whiteSpace: 'nowrap'
           }}>
             {showIsolatedNodes ? 'Show All Nodes' : 'Hide Nodes with No Edges'}
           </span>
           
-          {/* Toggle Switch - White circle on left/right */}
+          {/* Toggle Switch - Obsidian style */}
           <button
             onClick={() => setShowIsolatedNodes(!showIsolatedNodes)}
             className="flex items-center justify-start rounded-full transition-all duration-200 relative"
             style={{
               width: '44px',
               height: '24px',
-              backgroundColor: showIsolatedNodes ? '#BDB4D3' : '#D2CBBF',
+              backgroundColor: showIsolatedNodes ? '#64c864' : '#252525',
               padding: '2px',
-              border: 'none',
+              border: '1px solid rgba(100, 200, 100, 0.3)',
               cursor: 'pointer',
-              boxShadow: 'inset 0 2px 4px rgba(0, 0, 0, 0.1)'
+              boxShadow: showIsolatedNodes ? '0 0 8px rgba(100, 200, 100, 0.3)' : 'none'
             }}
             title={showIsolatedNodes ? 'Switch to hide isolated nodes' : 'Switch to show all nodes'}
             onMouseEnter={(e) => {
-              e.currentTarget.style.backgroundColor = showIsolatedNodes ? '#A39A86' : '#BDB4D3';
+              e.currentTarget.style.backgroundColor = showIsolatedNodes ? '#4ade80' : '#2d2d2d';
             }}
             onMouseLeave={(e) => {
-              e.currentTarget.style.backgroundColor = showIsolatedNodes ? '#BDB4D3' : '#D2CBBF';
+              e.currentTarget.style.backgroundColor = showIsolatedNodes ? '#64c864' : '#252525';
             }}
           >
             <div 
-              className="absolute rounded-full bg-white shadow-sm transition-all duration-200"
+              className="absolute rounded-full shadow-sm transition-all duration-200"
               style={{
                 width: '20px',
                 height: '20px',
                 left: showIsolatedNodes ? '22px' : '2px',
                 top: '2px',
-                boxShadow: '0 2px 4px rgba(0, 0, 0, 0.2)'
+                backgroundColor: '#e8e8e8',
+                boxShadow: '0 2px 4px rgba(0, 0, 0, 0.3)'
               }}
             />
           </button>
           
           <span style={{ 
             fontSize: '11px', 
-            color: '#707C5D',
+            color: '#b8b8b8',
             fontStyle: 'italic'
           }}>
             {showIsolatedNodes ? '(including isolated nodes)' : '(connected nodes only)'}
@@ -1022,12 +1026,12 @@ const GraphVisualization: React.FC<GraphVisualizationProps> = ({
         {/* Multi-select hint */}
         {selectedNodeIds.size === 0 && (
           <div style={{
-            background: '#F5F5DC',
-            border: `2px solid #BDB4D3`,
+            background: '#2d2d2d',
+            border: `1px solid rgba(100, 200, 100, 0.3)`,
             borderRadius: '8px',
             padding: '10px 14px',
-            boxShadow: '0 2px 8px rgba(189, 180, 211, 0.2)',
-            fontFamily: '"Lora", "Merriweather", "Georgia", serif',
+            boxShadow: '0 2px 8px rgba(0, 0, 0, 0.3)',
+            fontFamily: '-apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif',
             maxWidth: '280px'
           }}>
             <div style={{ 
@@ -1039,7 +1043,7 @@ const GraphVisualization: React.FC<GraphVisualizationProps> = ({
             }}
             onClick={() => setShowMultiSelectHint(!showMultiSelectHint)}
             >
-              <div style={{ fontSize: '12px', color: '#5D4037', fontWeight: '500' }}>
+              <div style={{ fontSize: '12px', color: '#e8e8e8', fontWeight: '500' }}>
                 💡 Multi-Select Nodes
               </div>
               <button
@@ -1052,7 +1056,7 @@ const GraphVisualization: React.FC<GraphVisualizationProps> = ({
                   border: 'none',
                   cursor: 'pointer',
                   fontSize: '14px',
-                  color: '#707C5D',
+                  color: '#b8b8b8',
                   padding: '2px 4px',
                   display: 'flex',
                   alignItems: 'center',
@@ -1064,23 +1068,25 @@ const GraphVisualization: React.FC<GraphVisualizationProps> = ({
               </button>
             </div>
             {showMultiSelectHint && (
-              <div style={{ fontSize: '11px', color: '#707C5D', lineHeight: '1.4' }}>
+              <div style={{ fontSize: '11px', color: '#b8b8b8', lineHeight: '1.4' }}>
                 Hold <kbd style={{ 
-                  background: '#E5E7EB', 
+                  background: '#252525', 
                   padding: '2px 6px', 
                   borderRadius: '4px', 
                   fontSize: '10px',
                   fontFamily: 'monospace',
                   fontWeight: '600',
-                  color: '#374151'
+                  color: '#64c864',
+                  border: '1px solid rgba(100, 200, 100, 0.3)'
                 }}>Ctrl</kbd> (Windows/Linux) or <kbd style={{ 
-                  background: '#E5E7EB', 
+                  background: '#252525', 
                   padding: '2px 6px', 
                   borderRadius: '4px', 
                   fontSize: '10px',
                   fontFamily: 'monospace',
                   fontWeight: '600',
-                  color: '#374151'
+                  color: '#64c864',
+                  border: '1px solid rgba(100, 200, 100, 0.3)'
                 }}>Cmd</kbd> (Mac) and click nodes to select multiple
               </div>
             )}
@@ -1090,69 +1096,71 @@ const GraphVisualization: React.FC<GraphVisualizationProps> = ({
         {/* Delete selected nodes button */}
         {selectedNodeIds.size > 0 && (
           <div style={{
-            background: '#F5F5DC',
-            border: `2px solid #F59E0B`,
+            background: '#2d2d2d',
+            border: `1px solid rgba(220, 38, 38, 0.4)`,
             borderRadius: '8px',
             padding: '10px 14px',
-            boxShadow: '0 2px 8px rgba(245, 158, 11, 0.25)',
+            boxShadow: '0 2px 8px rgba(0, 0, 0, 0.3)',
             display: 'flex',
             flexDirection: 'column',
             gap: '8px',
-            fontFamily: '"Lora", "Merriweather", "Georgia", serif',
+            fontFamily: '-apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif',
             maxWidth: '280px'
           }}>
             <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
               <button
                 onClick={handleDeleteSelectedNodes}
                 style={{
-                  background: '#F59E0B',
+                  background: '#dc4444',
                   border: 'none',
                   borderRadius: '6px',
                   padding: '6px 12px',
                   cursor: 'pointer',
-                  color: '#FFFFFF',
+                  color: '#e8e8e8',
                   fontSize: '12px',
                   fontWeight: '500',
                   transition: 'all 0.2s',
                   fontFamily: 'inherit'
                 }}
                 onMouseEnter={(e) => {
-                  e.currentTarget.style.background = '#D97706';
+                  e.currentTarget.style.background = '#b91c1c';
                 }}
                 onMouseLeave={(e) => {
-                  e.currentTarget.style.background = '#F59E0B';
+                  e.currentTarget.style.background = '#dc4444';
                 }}
               >
                 🗑️ Delete ({selectedNodeIds.size})
               </button>
-              <span style={{ fontSize: '11px', color: '#707C5D' }}>
+              <span style={{ fontSize: '11px', color: '#b8b8b8' }}>
                 {selectedNodeIds.size} node{selectedNodeIds.size > 1 ? 's' : ''} selected
               </span>
             </div>
-            <div style={{ fontSize: '10px', color: '#707C5D', fontStyle: 'italic', lineHeight: '1.3' }}>
+            <div style={{ fontSize: '10px', color: '#b8b8b8', fontStyle: 'italic', lineHeight: '1.3' }}>
               Continue holding <kbd style={{ 
-                background: '#E5E7EB', 
+                background: '#252525', 
                 padding: '1px 4px', 
                 borderRadius: '3px', 
                 fontSize: '9px',
                 fontFamily: 'monospace',
                 fontWeight: '600',
-                color: '#374151'
+                color: '#64c864',
+                border: '1px solid rgba(100, 200, 100, 0.3)'
               }}>Ctrl</kbd>/<kbd style={{ 
-                background: '#E5E7EB', 
+                background: '#252525', 
                 padding: '1px 4px', 
                 borderRadius: '3px', 
                 fontSize: '9px',
                 fontFamily: 'monospace',
                 fontWeight: '600',
-                color: '#374151'
+                color: '#64c864',
+                border: '1px solid rgba(100, 200, 100, 0.3)'
               }}>Cmd</kbd> to select more
             </div>
           </div>
         )}
       </div>
       
-      <svg ref={svgRef} style={{ width: '100%', height: '100%', display: 'block', border: `1px solid #D2CBBF`, backgroundColor: '#F5F5DC', borderRadius: '12px' }} />
+      <svg ref={svgRef} style={{ width: '100%', height: '100%', display: 'block', border: `1px solid rgba(100, 200, 100, 0.2)`, backgroundColor: '#1e1e1e', borderRadius: '12px' }} />
       
       {selectedNode && !isEditingNode && (() => {
         // Calculate position to keep panel within bounds
@@ -1181,8 +1189,8 @@ const GraphVisualization: React.FC<GraphVisualizationProps> = ({
           position: 'absolute', 
           top: `${top}px`, 
           right: `${right}px`, 
-          background: '#F5F5DC', 
-          border: `2px solid #BDB4D3`, 
+          background: '#2d2d2d', 
+          border: `1px solid rgba(100, 200, 100, 0.3)`, 
           padding: '20px', 
           borderRadius: '12px', 
           boxShadow: '0 3px 12px rgba(189, 180, 211, 0.25)', 
@@ -1192,60 +1200,60 @@ const GraphVisualization: React.FC<GraphVisualizationProps> = ({
           fontFamily: '"Lora", "Merriweather", "Georgia", serif',
           zIndex: 1001
         }}>
-          <h3 style={{ margin: '0 0 16px 0', color: '#5D4037', fontSize: '16px', fontWeight: '600', lineHeight: '1.4' }}>{selectedNode.title}</h3>
+          <h3 style={{ margin: '0 0 16px 0', color: '#e8e8e8', fontSize: '16px', fontWeight: '600', lineHeight: '1.4', fontFamily: '-apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif' }}>{selectedNode.title}</h3>
           <div style={{ marginTop: '16px', display: 'flex', justifyContent: 'flex-end', gap: '8px' }}>
-            <button onClick={() => { setEditNodeData({...selectedNode}); setIsEditingNode(true); }} className="bg-[#BDB4D3] hover:brightness-105 transition-all duration-200" style={{ padding: '8px 16px', color: '#F5F5DC', border: 'none', borderRadius: '8px', cursor: 'pointer', fontSize: '12px', fontWeight: '500', fontFamily: '"Inter", "Lato", sans-serif', backgroundColor: '#BDB4D3' }}>Edit</button>
-            <button onClick={() => handleDeleteNode(selectedNode.id)} style={{ padding: '8px 16px', backgroundColor: 'transparent', color: '#707C5D', border: `1px solid #A39A86`, borderRadius: '8px', cursor: 'pointer', fontSize: '12px', fontWeight: '500', fontFamily: '"Inter", "Lato", sans-serif', transition: 'all 0.2s ease' }} onMouseEnter={(e) => { e.currentTarget.style.backgroundColor = '#D2CBBF'; }} onMouseLeave={(e) => { e.currentTarget.style.backgroundColor = 'transparent'; }}>Delete</button>
-            <button onClick={() => setSelectedNode(null)} style={{ padding: '8px 16px', backgroundColor: 'transparent', color: '#707C5D', border: `1px solid #A39A86`, borderRadius: '8px', cursor: 'pointer', fontSize: '12px', fontWeight: '500', fontFamily: '"Inter", "Lato", sans-serif', transition: 'all 0.2s ease' }} onMouseEnter={(e) => { e.currentTarget.style.backgroundColor = '#D2CBBF'; }} onMouseLeave={(e) => { e.currentTarget.style.backgroundColor = 'transparent'; }}>close</button>
+            <button onClick={() => { setEditNodeData({...selectedNode}); setIsEditingNode(true); }} style={{ padding: '8px 16px', color: '#1e1e1e', border: 'none', borderRadius: '8px', cursor: 'pointer', fontSize: '12px', fontWeight: '600', fontFamily: '-apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif', backgroundColor: '#64c864', transition: 'all 0.2s ease' }} onMouseEnter={(e) => { e.currentTarget.style.backgroundColor = '#4ade80'; }} onMouseLeave={(e) => { e.currentTarget.style.backgroundColor = '#64c864'; }}>Edit</button>
+            <button onClick={() => handleDeleteNode(selectedNode.id)} style={{ padding: '8px 16px', backgroundColor: 'transparent', color: '#b8b8b8', border: `1px solid rgba(100, 200, 100, 0.3)`, borderRadius: '8px', cursor: 'pointer', fontSize: '12px', fontWeight: '500', fontFamily: '-apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif', transition: 'all 0.2s ease' }} onMouseEnter={(e) => { e.currentTarget.style.backgroundColor = '#252525'; e.currentTarget.style.color = '#dc4444'; }} onMouseLeave={(e) => { e.currentTarget.style.backgroundColor = 'transparent'; e.currentTarget.style.color = '#b8b8b8'; }}>Delete</button>
+            <button onClick={() => setSelectedNode(null)} style={{ padding: '8px 16px', backgroundColor: 'transparent', color: '#b8b8b8', border: `1px solid rgba(100, 200, 100, 0.3)`, borderRadius: '8px', cursor: 'pointer', fontSize: '12px', fontWeight: '500', fontFamily: '-apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif', transition: 'all 0.2s ease' }} onMouseEnter={(e) => { e.currentTarget.style.backgroundColor = '#252525'; e.currentTarget.style.color = '#e8e8e8'; }} onMouseLeave={(e) => { e.currentTarget.style.backgroundColor = 'transparent'; e.currentTarget.style.color = '#b8b8b8'; }}>close</button>
           </div>
           <div style={{ marginTop: '16px', fontSize: '13px', lineHeight: '1.5' }}>
-            <p style={{ marginBottom: '8px', color: '#5D4037' }}><span style={{ fontWeight: '600', color: '#707C5D' }}>author:</span> {selectedNode.authors?.join(', ') || 'no author info'}</p>
-            <p style={{ marginBottom: '8px', color: '#5D4037' }}><span style={{ fontWeight: '600', color: '#707C5D' }}>Year:</span> {selectedNode.year || 'Unspecified'}</p>
-            <p style={{ marginBottom: '8px', color: '#5D4037' }}><span style={{ fontWeight: '600', color: '#707C5D' }}>venue:</span> {selectedNode.venue || 'no venue info'}</p>
-            <p style={{ marginBottom: '8px', color: '#5D4037' }}><span style={{ fontWeight: '600', color: '#707C5D' }}>abstract:</span> {selectedNode.abstract || 'no abstract info'}</p>
-            <p style={{ marginBottom: '8px', color: '#5D4037' }}><span style={{ fontWeight: '600', color: '#707C5D' }}>citations:</span> {selectedNode.citationCount !== undefined ? selectedNode.citationCount.toLocaleString() : 'no citation info'}</p>
-            <p style={{ marginBottom: '0', color: '#5D4037' }}><span style={{ fontWeight: '600', color: '#707C5D' }}>tags(didn't work currently):</span> {selectedNode.tags?.join(', ') || 'no tags'}</p>
+            <p style={{ marginBottom: '8px', color: '#e8e8e8' }}><span style={{ fontWeight: '600', color: '#64c864' }}>author:</span> {selectedNode.authors?.join(', ') || 'no author info'}</p>
+            <p style={{ marginBottom: '8px', color: '#e8e8e8' }}><span style={{ fontWeight: '600', color: '#64c864' }}>Year:</span> {selectedNode.year || 'Unspecified'}</p>
+            <p style={{ marginBottom: '8px', color: '#e8e8e8' }}><span style={{ fontWeight: '600', color: '#64c864' }}>venue:</span> {selectedNode.venue || 'no venue info'}</p>
+            <p style={{ marginBottom: '8px', color: '#e8e8e8' }}><span style={{ fontWeight: '600', color: '#64c864' }}>abstract:</span> {selectedNode.abstract || 'no abstract info'}</p>
+            <p style={{ marginBottom: '8px', color: '#e8e8e8' }}><span style={{ fontWeight: '600', color: '#64c864' }}>citations:</span> {selectedNode.citationCount !== undefined ? selectedNode.citationCount.toLocaleString() : 'no citation info'}</p>
+            <p style={{ marginBottom: '0', color: '#e8e8e8' }}><span style={{ fontWeight: '600', color: '#64c864' }}>tags(didn't work currently):</span> {selectedNode.tags?.join(', ') || 'no tags'}</p>
           </div>
         </div>
         );
       })()}
 
       {isEditingNode && editNodeData && (
-        <div style={{ position: 'absolute', top: '16px', right: '16px', background: '#F5F5DC', border: `2px solid #BDB4D3`, padding: '20px', borderRadius: '12px', boxShadow: '0 3px 12px rgba(189, 180, 211, 0.25)', width: '340px', maxHeight: '500px', overflowY: 'auto', fontFamily: '"Lora", "Merriweather", "Georgia", serif' }}>
+        <div style={{ position: 'absolute', top: '16px', right: '16px', background: '#2d2d2d', border: `1px solid rgba(100, 200, 100, 0.3)`, padding: '20px', borderRadius: '12px', boxShadow: '0 3px 12px rgba(0, 0, 0, 0.4)', width: '340px', maxHeight: '500px', overflowY: 'auto', fontFamily: '-apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif' }}>
           <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '16px' }}>
-            <h3 style={{ margin: '0', color: '#5D4037', fontSize: '16px', fontWeight: '600' }}>edit paper info</h3>
+            <h3 style={{ margin: '0', color: '#e8e8e8', fontSize: '16px', fontWeight: '600' }}>edit paper info</h3>
             <div style={{ display: 'flex', gap: '8px' }}>
-              <button onClick={handleSaveNodeEdit} className="bg-[#BDB4D3] hover:brightness-105 transition-all duration-200" style={{ padding: '8px 16px', color: '#F5F5DC', border: 'none', borderRadius: '8px', cursor: 'pointer', fontSize: '12px', fontWeight: '500', backgroundColor: '#BDB4D3' }}>儲存</button>
-              <button onClick={() => { setIsEditingNode(false); setEditNodeData(null); }} style={{ padding: '8px 16px', backgroundColor: 'transparent', color: '#707C5D', border: `1px solid #A39A86`, borderRadius: '8px', cursor: 'pointer', fontSize: '12px', fontWeight: '500', transition: 'all 0.2s ease' }} onMouseEnter={(e) => { e.currentTarget.style.backgroundColor = '#D2CBBF'; }} onMouseLeave={(e) => { e.currentTarget.style.backgroundColor = 'transparent'; }}>取消</button>
+              <button onClick={handleSaveNodeEdit} style={{ padding: '8px 16px', color: '#1e1e1e', border: 'none', borderRadius: '8px', cursor: 'pointer', fontSize: '12px', fontWeight: '600', fontFamily: '-apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif', backgroundColor: '#64c864', transition: 'all 0.2s ease' }} onMouseEnter={(e) => { e.currentTarget.style.backgroundColor = '#4ade80'; }} onMouseLeave={(e) => { e.currentTarget.style.backgroundColor = '#64c864'; }}>儲存</button>
+              <button onClick={() => { setIsEditingNode(false); setEditNodeData(null); }} style={{ padding: '8px 16px', backgroundColor: 'transparent', color: '#b8b8b8', border: `1px solid rgba(100, 200, 100, 0.3)`, borderRadius: '8px', cursor: 'pointer', fontSize: '12px', fontWeight: '500', fontFamily: '-apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif', transition: 'all 0.2s ease' }} onMouseEnter={(e) => { e.currentTarget.style.backgroundColor = '#252525'; e.currentTarget.style.color = '#e8e8e8'; }} onMouseLeave={(e) => { e.currentTarget.style.backgroundColor = 'transparent'; e.currentTarget.style.color = '#b8b8b8'; }}>取消</button>
             </div>
           </div>
           <div style={{ marginBottom: '12px' }}>
-            <label style={{ display: 'block', marginBottom: '6px', fontWeight: '600', color: '#707C5D', fontSize: '13px' }}>Title:</label>
-            <input type="text" value={editNodeData.title} onChange={(e) => setEditNodeData({...editNodeData, title: e.target.value})} style={{ width: '100%', padding: '8px 12px', border: `1px solid #BDB4D3`, borderRadius: '8px', backgroundColor: '#FFFFFF', color: '#5D4037', fontSize: '13px', fontFamily: '"Inter", "Lato", sans-serif' }} />
+            <label style={{ display: 'block', marginBottom: '6px', fontWeight: '600', color: '#64c864', fontSize: '13px' }}>Title:</label>
+            <input type="text" value={editNodeData.title} onChange={(e) => setEditNodeData({...editNodeData, title: e.target.value})} style={{ width: '100%', padding: '8px 12px', border: `1px solid rgba(100, 200, 100, 0.3)`, borderRadius: '8px', backgroundColor: '#252525', color: '#e8e8e8', fontSize: '13px', fontFamily: '-apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif' }} />
           </div>
           <div style={{ marginBottom: '12px' }}>
-            <label style={{ display: 'block', marginBottom: '6px', fontWeight: '600', color: '#707C5D', fontSize: '13px' }}>author:</label>
-            <input type="text" value={editNodeData.authors.join(', ')} onChange={(e) => setEditNodeData({...editNodeData, authors: e.target.value.split(', ').filter(a => a.trim())})} style={{ width: '100%', padding: '8px 12px', border: `1px solid #BDB4D3`, borderRadius: '8px', backgroundColor: '#FFFFFF', color: '#5D4037', fontSize: '13px', fontFamily: '"Inter", "Lato", sans-serif' }} />
+            <label style={{ display: 'block', marginBottom: '6px', fontWeight: '600', color: '#64c864', fontSize: '13px' }}>author:</label>
+            <input type="text" value={editNodeData.authors.join(', ')} onChange={(e) => setEditNodeData({...editNodeData, authors: e.target.value.split(', ').filter(a => a.trim())})} style={{ width: '100%', padding: '8px 12px', border: `1px solid rgba(100, 200, 100, 0.3)`, borderRadius: '8px', backgroundColor: '#252525', color: '#e8e8e8', fontSize: '13px', fontFamily: '-apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif' }} />
           </div>
           <div style={{ marginBottom: '12px' }}>
-            <label style={{ display: 'block', marginBottom: '6px', fontWeight: '600', color: '#707C5D', fontSize: '13px' }}>Year:</label>
-            <input type="text" value={editNodeData.year || ''} onChange={(e) => setEditNodeData({...editNodeData, year: e.target.value})} style={{ width: '100%', padding: '8px 12px', border: `1px solid #BDB4D3`, borderRadius: '8px', backgroundColor: '#FFFFFF', color: '#5D4037', fontSize: '13px', fontFamily: '"Inter", "Lato", sans-serif' }} />
+            <label style={{ display: 'block', marginBottom: '6px', fontWeight: '600', color: '#64c864', fontSize: '13px' }}>Year:</label>
+            <input type="text" value={editNodeData.year || ''} onChange={(e) => setEditNodeData({...editNodeData, year: e.target.value})} style={{ width: '100%', padding: '8px 12px', border: `1px solid rgba(100, 200, 100, 0.3)`, borderRadius: '8px', backgroundColor: '#252525', color: '#e8e8e8', fontSize: '13px', fontFamily: '-apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif' }} />
           </div>
           <div style={{ marginBottom: '12px' }}>
-            <label style={{ display: 'block', marginBottom: '6px', fontWeight: '600', color: '#707C5D', fontSize: '13px' }}>abstract:</label>
-            <textarea value={editNodeData.abstract || ''} onChange={(e) => setEditNodeData({...editNodeData, abstract: e.target.value})} rows={4} style={{ width: '100%', padding: '8px 12px', border: `1px solid #BDB4D3`, borderRadius: '8px', backgroundColor: '#FFFFFF', color: '#5D4037', fontSize: '13px', fontFamily: '"Inter", "Lato", sans-serif', resize: 'vertical' }} />
+            <label style={{ display: 'block', marginBottom: '6px', fontWeight: '600', color: '#64c864', fontSize: '13px' }}>abstract:</label>
+            <textarea value={editNodeData.abstract || ''} onChange={(e) => setEditNodeData({...editNodeData, abstract: e.target.value})} rows={4} style={{ width: '100%', padding: '8px 12px', border: `1px solid rgba(100, 200, 100, 0.3)`, borderRadius: '8px', backgroundColor: '#252525', color: '#e8e8e8', fontSize: '13px', fontFamily: '-apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif', resize: 'vertical' }} />
           </div>
           <div style={{ marginBottom: '12px' }}>
-            <label style={{ display: 'block', marginBottom: '6px', fontWeight: '600', color: '#707C5D', fontSize: '13px' }}>venue:</label>
-            <input type="text" value={editNodeData.venue || ''} onChange={(e) => setEditNodeData({...editNodeData, venue: e.target.value})} style={{ width: '100%', padding: '8px 12px', border: `1px solid #BDB4D3`, borderRadius: '8px', backgroundColor: '#FFFFFF', color: '#5D4037', fontSize: '13px', fontFamily: '"Inter", "Lato", sans-serif' }} />
+            <label style={{ display: 'block', marginBottom: '6px', fontWeight: '600', color: '#64c864', fontSize: '13px' }}>venue:</label>
+            <input type="text" value={editNodeData.venue || ''} onChange={(e) => setEditNodeData({...editNodeData, venue: e.target.value})} style={{ width: '100%', padding: '8px 12px', border: `1px solid rgba(100, 200, 100, 0.3)`, borderRadius: '8px', backgroundColor: '#252525', color: '#e8e8e8', fontSize: '13px', fontFamily: '-apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif' }} />
           </div>
           <div style={{ marginBottom: '12px' }}>
-            <label style={{ display: 'block', marginBottom: '6px', fontWeight: '600', color: '#707C5D', fontSize: '13px' }}>citation(didn't work currently):</label>
-            <input type="number" value={editNodeData.citationCount || 0} onChange={(e) => setEditNodeData({...editNodeData, citationCount: parseInt(e.target.value) || 0})} style={{ width: '100%', padding: '8px 12px', border: `1px solid #BDB4D3`, borderRadius: '8px', backgroundColor: '#FFFFFF', color: '#5D4037', fontSize: '13px', fontFamily: '"Inter", "Lato", sans-serif' }} />
+            <label style={{ display: 'block', marginBottom: '6px', fontWeight: '600', color: '#64c864', fontSize: '13px' }}>citation(didn't work currently):</label>
+            <input type="number" value={editNodeData.citationCount || 0} onChange={(e) => setEditNodeData({...editNodeData, citationCount: parseInt(e.target.value) || 0})} style={{ width: '100%', padding: '8px 12px', border: `1px solid rgba(100, 200, 100, 0.3)`, borderRadius: '8px', backgroundColor: '#252525', color: '#e8e8e8', fontSize: '13px', fontFamily: '-apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif' }} />
           </div>
           <div style={{ marginBottom: '0' }}>
-            <label style={{ display: 'block', marginBottom: '6px', fontWeight: '600', color: '#707C5D', fontSize: '13px' }}>tags(didn't work currently):</label>
-            <input type="text" value={editNodeData.tags.join(', ')} onChange={(e) => setEditNodeData({...editNodeData, tags: e.target.value.split(', ').filter(t => t.trim())})} style={{ width: '100%', padding: '8px 12px', border: `1px solid #BDB4D3`, borderRadius: '8px', backgroundColor: '#FFFFFF', color: '#5D4037', fontSize: '13px', fontFamily: '"Inter", "Lato", sans-serif' }} />
+            <label style={{ display: 'block', marginBottom: '6px', fontWeight: '600', color: '#64c864', fontSize: '13px' }}>tags(didn't work currently):</label>
+            <input type="text" value={editNodeData.tags.join(', ')} onChange={(e) => setEditNodeData({...editNodeData, tags: e.target.value.split(', ').filter(t => t.trim())})} style={{ width: '100%', padding: '8px 12px', border: `1px solid rgba(100, 200, 100, 0.3)`, borderRadius: '8px', backgroundColor: '#252525', color: '#e8e8e8', fontSize: '13px', fontFamily: '-apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif' }} />
           </div>
         </div>
       )}
@@ -1277,8 +1285,8 @@ const GraphVisualization: React.FC<GraphVisualizationProps> = ({
           position: 'absolute', 
           top: `${top}px`, 
           right: `${right}px`, 
-          background: '#F5F5DC', 
-          border: `2px solid #BDB4D3`, 
+          background: '#2d2d2d', 
+          border: `1px solid rgba(100, 200, 100, 0.3)`, 
           padding: '20px', 
           borderRadius: '12px', 
           boxShadow: '0 3px 12px rgba(189, 180, 211, 0.25)', 
@@ -1288,15 +1296,15 @@ const GraphVisualization: React.FC<GraphVisualizationProps> = ({
           fontFamily: '"Lora", "Merriweather", "Georgia", serif',
           zIndex: 1001
         }}>
-          <h4 style={{ margin: '0 0 16px 0', color: '#5D4037', fontSize: '16px', fontWeight: '600' }}>relation info</h4>
+          <h4 style={{ margin: '0 0 16px 0', color: '#e8e8e8', fontSize: '16px', fontWeight: '600', fontFamily: '-apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif' }}>relation info</h4>
           <div style={{ fontSize: '13px', lineHeight: '1.5' }}>
-            <p style={{ marginBottom: '8px', color: '#5D4037' }}><span style={{ fontWeight: '600', color: '#707C5D' }}>relation:</span> {selectedEdge.relationship}</p>
-            <p style={{ marginBottom: '8px', color: '#5D4037' }}><span style={{ fontWeight: '600', color: '#707C5D' }}>description:</span> {selectedEdge.description}</p>
-            <p style={{ marginBottom: '8px', color: '#5D4037' }}><span style={{ fontWeight: '600', color: '#707C5D' }}>original context:</span> {selectedEdge.evidence}</p>
-            <p style={{ marginBottom: '16px', color: '#5D4037' }}><span style={{ fontWeight: '600', color: '#707C5D' }}>strength:</span> {selectedEdge.strength}</p>
+            <p style={{ marginBottom: '8px', color: '#e8e8e8' }}><span style={{ fontWeight: '600', color: '#64c864' }}>relation:</span> {selectedEdge.relationship}</p>
+            <p style={{ marginBottom: '8px', color: '#e8e8e8' }}><span style={{ fontWeight: '600', color: '#64c864' }}>description:</span> {selectedEdge.description}</p>
+            <p style={{ marginBottom: '8px', color: '#e8e8e8' }}><span style={{ fontWeight: '600', color: '#64c864' }}>original context:</span> {selectedEdge.evidence}</p>
+            <p style={{ marginBottom: '16px', color: '#e8e8e8' }}><span style={{ fontWeight: '600', color: '#64c864' }}>strength:</span> {selectedEdge.strength}</p>
             <div style={{ marginTop: '16px', display: 'flex', gap: '8px', justifyContent: 'flex-end' }}>
-              <button onClick={() => { setEditEdgeData({ ...selectedEdge, source: (selectedEdge.source as Node).id, target: (selectedEdge.target as Node).id }); setIsEditingEdge(true); }} className="bg-[#BDB4D3] hover:brightness-105 transition-all duration-200" style={{ padding: '8px 16px', color: '#F5F5DC', border: 'none', borderRadius: '8px', cursor: 'pointer', fontSize: '12px', fontWeight: '500', backgroundColor: '#BDB4D3' }}>Edit</button>
-              <button onClick={() => setSelectedEdge(null)} style={{ padding: '8px 16px', backgroundColor: 'transparent', color: '#707C5D', border: `1px solid #A39A86`, borderRadius: '8px', cursor: 'pointer', fontSize: '12px', fontWeight: '500', transition: 'all 0.2s ease' }} onMouseEnter={(e) => { e.currentTarget.style.backgroundColor = '#D2CBBF'; }} onMouseLeave={(e) => { e.currentTarget.style.backgroundColor = 'transparent'; }}>Close</button>
+              <button onClick={() => { setEditEdgeData({ ...selectedEdge, source: (selectedEdge.source as Node).id, target: (selectedEdge.target as Node).id }); setIsEditingEdge(true); }} style={{ padding: '8px 16px', color: '#1e1e1e', border: 'none', borderRadius: '8px', cursor: 'pointer', fontSize: '12px', fontWeight: '600', fontFamily: '-apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif', backgroundColor: '#64c864', transition: 'all 0.2s ease' }} onMouseEnter={(e) => { e.currentTarget.style.backgroundColor = '#4ade80'; }} onMouseLeave={(e) => { e.currentTarget.style.backgroundColor = '#64c864'; }}>Edit</button>
+              <button onClick={() => setSelectedEdge(null)} style={{ padding: '8px 16px', backgroundColor: 'transparent', color: '#b8b8b8', border: `1px solid rgba(100, 200, 100, 0.3)`, borderRadius: '8px', cursor: 'pointer', fontSize: '12px', fontWeight: '500', fontFamily: '-apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif', transition: 'all 0.2s ease' }} onMouseEnter={(e) => { e.currentTarget.style.backgroundColor = '#252525'; e.currentTarget.style.color = '#e8e8e8'; }} onMouseLeave={(e) => { e.currentTarget.style.backgroundColor = 'transparent'; e.currentTarget.style.color = '#b8b8b8'; }}>Close</button>
             </div>
           </div>
         </div>
@@ -1304,36 +1312,36 @@ const GraphVisualization: React.FC<GraphVisualizationProps> = ({
       })()}
 
       {isEditingEdge && editEdgeData && (
-        <div style={{ position: 'absolute', top: '320px', right: '16px', background: '#F5F5DC', border: `2px solid #BDB4D3`, padding: '20px', borderRadius: '12px', maxHeight: '400px', boxShadow: '0 3px 12px rgba(189, 180, 211, 0.25)', width: '340px', fontFamily: '"Lora", "Merriweather", "Georgia", serif' }}>
+        <div style={{ position: 'absolute', top: '320px', right: '16px', background: '#2d2d2d', border: `1px solid rgba(100, 200, 100, 0.3)`, padding: '20px', borderRadius: '12px', maxHeight: '400px', boxShadow: '0 3px 12px rgba(0, 0, 0, 0.4)', width: '340px', fontFamily: '-apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif' }}>
           <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '16px' }}>
-            <h4 style={{ margin: '0', color: '#5D4037', fontSize: '16px', fontWeight: '600' }}>Edit Connection</h4>
+            <h4 style={{ margin: '0', color: '#e8e8e8', fontSize: '16px', fontWeight: '600' }}>Edit Connection</h4>
             <div style={{ display: 'flex', gap: '8px' }}>
-              <button onClick={handleSaveEdgeEdit} className="bg-[#BDB4D3] hover:brightness-105 transition-all duration-200" style={{ padding: '8px 16px', color: '#F5F5DC', border: 'none', borderRadius: '8px', cursor: 'pointer', fontSize: '12px', fontWeight: '500', backgroundColor: '#BDB4D3' }}>儲存</button>
-              <button onClick={() => { setIsEditingEdge(false); setEditEdgeData(null); }} style={{ padding: '8px 16px', backgroundColor: 'transparent', color: '#707C5D', border: `1px solid #A39A86`, borderRadius: '8px', cursor: 'pointer', fontSize: '12px', fontWeight: '500', transition: 'all 0.2s ease' }} onMouseEnter={(e) => { e.currentTarget.style.backgroundColor = '#D2CBBF'; }} onMouseLeave={(e) => { e.currentTarget.style.backgroundColor = 'transparent'; }}>取消</button>
+              <button onClick={handleSaveEdgeEdit} style={{ padding: '8px 16px', color: '#1e1e1e', border: 'none', borderRadius: '8px', cursor: 'pointer', fontSize: '12px', fontWeight: '600', fontFamily: '-apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif', backgroundColor: '#64c864', transition: 'all 0.2s ease' }} onMouseEnter={(e) => { e.currentTarget.style.backgroundColor = '#4ade80'; }} onMouseLeave={(e) => { e.currentTarget.style.backgroundColor = '#64c864'; }}>儲存</button>
+              <button onClick={() => { setIsEditingEdge(false); setEditEdgeData(null); }} style={{ padding: '8px 16px', backgroundColor: 'transparent', color: '#b8b8b8', border: `1px solid rgba(100, 200, 100, 0.3)`, borderRadius: '8px', cursor: 'pointer', fontSize: '12px', fontWeight: '500', fontFamily: '-apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif', transition: 'all 0.2s ease' }} onMouseEnter={(e) => { e.currentTarget.style.backgroundColor = '#252525'; e.currentTarget.style.color = '#e8e8e8'; }} onMouseLeave={(e) => { e.currentTarget.style.backgroundColor = 'transparent'; e.currentTarget.style.color = '#b8b8b8'; }}>取消</button>
             </div>
           </div>
           <div style={{ marginBottom: '12px' }}>
-            <label style={{ display: 'block', marginBottom: '6px', fontWeight: '600', color: '#707C5D', fontSize: '13px' }}>relation type:</label>
-            <select value={editEdgeData.relationship} onChange={(e) => setEditEdgeData({...editEdgeData, relationship: e.target.value})} style={{ width: '100%', padding: '8px 12px', border: `1px solid #BDB4D3`, borderRadius: '8px', backgroundColor: '#FFFFFF', color: '#5D4037', fontSize: '13px', fontFamily: '"Inter", "Lato", sans-serif' }}>
-              <option value="cites">引用 (cites)</option>
-              <option value="builds on">建構於 (builds on)</option>
-              <option value="extends">擴展 (extends)</option>
-              <option value="compares">比較 (compares)</option>
-              <option value="contradicts">反駁 (contradicts)</option>
-              <option value="related">相關 (related)</option>
+            <label style={{ display: 'block', marginBottom: '6px', fontWeight: '600', color: '#64c864', fontSize: '13px' }}>relation type:</label>
+            <select value={editEdgeData.relationship} onChange={(e) => setEditEdgeData({...editEdgeData, relationship: e.target.value})} style={{ width: '100%', padding: '8px 12px', border: `1px solid rgba(100, 200, 100, 0.3)`, borderRadius: '8px', backgroundColor: '#252525', color: '#e8e8e8', fontSize: '13px', fontFamily: '-apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif' }}>
+              <option value="cites" style={{ backgroundColor: '#252525', color: '#e8e8e8' }}>引用 (cites)</option>
+              <option value="builds on" style={{ backgroundColor: '#252525', color: '#e8e8e8' }}>建構於 (builds on)</option>
+              <option value="extends" style={{ backgroundColor: '#252525', color: '#e8e8e8' }}>擴展 (extends)</option>
+              <option value="compares" style={{ backgroundColor: '#252525', color: '#e8e8e8' }}>比較 (compares)</option>
+              <option value="contradicts" style={{ backgroundColor: '#252525', color: '#e8e8e8' }}>反駁 (contradicts)</option>
+              <option value="related" style={{ backgroundColor: '#252525', color: '#e8e8e8' }}>相關 (related)</option>
             </select>
           </div>
           <div style={{ marginBottom: '12px' }}>
-            <label style={{ display: 'block', marginBottom: '6px', fontWeight: '600', color: '#707C5D', fontSize: '13px' }}>description:</label>
-            <textarea value={editEdgeData.description} onChange={(e) => setEditEdgeData({...editEdgeData, description: e.target.value})} rows={3} style={{ width: '100%', padding: '8px 12px', border: `1px solid #BDB4D3`, borderRadius: '8px', backgroundColor: '#FFFFFF', color: '#5D4037', fontSize: '13px', fontFamily: '"Inter", "Lato", sans-serif', resize: 'vertical' }} />
+            <label style={{ display: 'block', marginBottom: '6px', fontWeight: '600', color: '#64c864', fontSize: '13px' }}>description:</label>
+            <textarea value={editEdgeData.description} onChange={(e) => setEditEdgeData({...editEdgeData, description: e.target.value})} rows={3} style={{ width: '100%', padding: '8px 12px', border: `1px solid rgba(100, 200, 100, 0.3)`, borderRadius: '8px', backgroundColor: '#252525', color: '#e8e8e8', fontSize: '13px', fontFamily: '-apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif', resize: 'vertical' }} />
           </div>
           <div style={{ marginBottom: '12px' }}>
-            <label style={{ display: 'block', marginBottom: '6px', fontWeight: '500', color: '#B89B74', fontSize: '13px' }}>original context:</label>
-            <textarea value={editEdgeData.evidence} onChange={(e) => setEditEdgeData({...editEdgeData, evidence: e.target.value})} rows={2} style={{ width: '100%', padding: '8px 12px', border: `1px solid #D2CBBF`, borderRadius: '8px', backgroundColor: '#F5F5DC', color: '#5D4037', fontSize: '13px', fontFamily: '"Inter", "Lato", sans-serif', resize: 'vertical' }} />
+            <label style={{ display: 'block', marginBottom: '6px', fontWeight: '600', color: '#64c864', fontSize: '13px' }}>original context:</label>
+            <textarea value={editEdgeData.evidence} onChange={(e) => setEditEdgeData({...editEdgeData, evidence: e.target.value})} rows={2} style={{ width: '100%', padding: '8px 12px', border: `1px solid rgba(100, 200, 100, 0.3)`, borderRadius: '8px', backgroundColor: '#252525', color: '#e8e8e8', fontSize: '13px', fontFamily: '-apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif', resize: 'vertical' }} />
           </div>
           <div style={{ marginBottom: '0' }}>
-            <label style={{ display: 'block', marginBottom: '6px', fontWeight: '500', color: '#B89B74', fontSize: '13px' }}>strength (0-1):</label>
-            <input type="number" min="0" max="1" step="0.1" value={editEdgeData.strength} onChange={(e) => setEditEdgeData({...editEdgeData, strength: parseFloat(e.target.value) || 0})} style={{ width: '100%', padding: '8px 12px', border: `1px solid #D2CBBF`, borderRadius: '8px', backgroundColor: '#F5F5DC', color: '#5D4037', fontSize: '13px', fontFamily: '"Inter", "Lato", sans-serif' }} />
+            <label style={{ display: 'block', marginBottom: '6px', fontWeight: '600', color: '#64c864', fontSize: '13px' }}>strength (0-1):</label>
+            <input type="number" min="0" max="1" step="0.1" value={editEdgeData.strength} onChange={(e) => setEditEdgeData({...editEdgeData, strength: parseFloat(e.target.value) || 0})} style={{ width: '100%', padding: '8px 12px', border: `1px solid rgba(100, 200, 100, 0.3)`, borderRadius: '8px', backgroundColor: '#252525', color: '#e8e8e8', fontSize: '13px', fontFamily: '-apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif' }} />
           </div>
         </div>
       )}
