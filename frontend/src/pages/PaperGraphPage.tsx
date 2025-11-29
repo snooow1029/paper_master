@@ -522,6 +522,7 @@ const PaperGraphPage: React.FC = () => {
   
   // Old analysis function (kept for reference, but replaced by handleAnalyze)
   // eslint-disable-next-line @typescript-eslint/no-unused-vars
+  // @ts-expect-error - Kept for reference only, not used
   const _oldHandleAnalyze = async () => {
     const validUrls = urls.filter(url => url.trim());
     if (validUrls.length === 0) {
