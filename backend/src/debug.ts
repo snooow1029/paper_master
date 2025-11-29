@@ -74,10 +74,28 @@ export function logStartupInfo() {
   // Check packages
   console.log('\n📦 Package Status:');
   const packages = ['pg', 'typeorm', 'express', 'axios'];
+  const fs = require('fs');
+  const path = require('path');
+  
   packages.forEach(pkg => {
     try {
-      const pkgInfo = require(`${pkg}/package.json`);
-      console.log(`  ✅ ${pkg}: ${pkgInfo.version}`);
+      // First check if package can be resolved
+      const pkgPath = require.resolve(pkg);
+      // Then try to read package.json from node_modules
+      const pkgJsonPath = path.join(path.dirname(pkgPath), '..', 'package.json');
+      if (fs.existsSync(pkgJsonPath)) {
+        const pkgInfo = JSON.parse(fs.readFileSync(pkgJsonPath, 'utf8'));
+        console.log(`  ✅ ${pkg}: ${pkgInfo.version}`);
+      } else {
+        // Fallback: try to find package.json in node_modules
+        const nodeModulesPath = path.join(process.cwd(), 'node_modules', pkg, 'package.json');
+        if (fs.existsSync(nodeModulesPath)) {
+          const pkgInfo = JSON.parse(fs.readFileSync(nodeModulesPath, 'utf8'));
+          console.log(`  ✅ ${pkg}: ${pkgInfo.version}`);
+        } else {
+          console.log(`  ✅ ${pkg}: INSTALLED (version unknown)`);
+        }
+      }
     } catch (error) {
       console.log(`  ❌ ${pkg}: NOT FOUND`);
     }

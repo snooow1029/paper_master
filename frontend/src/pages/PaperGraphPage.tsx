@@ -1,5 +1,6 @@
-import React, { useState } from 'react';
+import React, { useState, useEffect, useRef } from 'react';
 import GraphVisualization from '../components/GraphVisualization';
+import AnalysisProgress from '../components/AnalysisProgress';
 import { GraphData } from '../types/graph';
 import '../styles/theme.css';
 import {
@@ -45,6 +46,18 @@ const PaperGraphPage: React.FC = () => {
   const [graphData, setGraphData] = useState<GraphData | null>(null);
   const [isLoading, setIsLoading] = useState(false);
   const [_error, setError] = useState<string | null>(null);
+  
+  // Progress state
+  const [progress, setProgress] = useState(0);
+  const [progressInfo, setProgressInfo] = useState<{
+    progress: number;
+    step?: string;
+    currentStep?: string;
+    details?: string;
+  } | undefined>(undefined);
+  
+  // SSE connection ref
+  const eventSourceRef = useRef<EventSource | null>(null);
   
   // 保存用户输入的原始论文 URLs（用于 Prior/Derivative Works）
   const [_originalPaperUrls, setOriginalPaperUrls] = useState<string[]>([]);
@@ -102,7 +115,8 @@ const PaperGraphPage: React.FC = () => {
   const [isConfigCollapsed, setIsConfigCollapsed] = useState(false);
   
   // Overall bottom section collapse state
-  const [showBottomSection, setShowBottomSection] = useState(true);
+  // Guide section - 改為可摺疊的側邊欄，而不是底部固定區域
+  const [showGuideSidebar, setShowGuideSidebar] = useState(false);
 
   // URL management
   const updateUrl = (index: number, value: string) => {
@@ -190,6 +204,16 @@ const PaperGraphPage: React.FC = () => {
 
   void enhanceWithCitationCounts;
 
+  // Cleanup SSE connection
+  useEffect(() => {
+    return () => {
+      if (eventSourceRef.current) {
+        eventSourceRef.current.close();
+        eventSourceRef.current = null;
+      }
+    };
+  }, []);
+
   // Main analysis function
   const handleAnalyze = async () => {
     const validUrls = urls.filter(url => url.trim());
@@ -200,9 +224,316 @@ const PaperGraphPage: React.FC = () => {
 
     setIsLoading(true);
     setError(null);
+    setProgress(0);
+    setProgressInfo(undefined);
+
+    // Close existing SSE connection if any
+    if (eventSourceRef.current) {
+      eventSourceRef.current.close();
+      eventSourceRef.current = null;
+    }
 
     try {
-      // 使用原本的圖分析API
+      // Step 1: Submit task
+      const submitResponse = await fetch(`${API_BASE_URL}/api/tasks/analyze-papers`, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({
+          urls: validUrls,
+          filterSections,
+          expansionDepth
+        })
+      });
+
+      if (!submitResponse.ok) {
+        throw new Error(`Failed to submit task: ${submitResponse.statusText}`);
+      }
+
+      const submitResult = await submitResponse.json();
+      if (!submitResult.success || !submitResult.taskId) {
+        throw new Error('Failed to create analysis task');
+      }
+
+      const taskId = submitResult.taskId;
+
+      // Step 2: Connect to SSE stream
+      const eventSource = new EventSource(`${API_BASE_URL}/api/tasks/${taskId}/stream`);
+      eventSourceRef.current = eventSource;
+
+      eventSource.onmessage = (event) => {
+        try {
+          const data = JSON.parse(event.data);
+          
+          if (data.type === 'connected') {
+            console.log('Connected to progress stream');
+          } else if (data.type === 'progress') {
+            setProgress(data.progress || 0);
+            setProgressInfo(data.progressInfo || {
+              progress: data.progress || 0,
+              currentStep: 'Processing...'
+            });
+          } else if (data.type === 'completed') {
+            // Task completed, fetch result
+            eventSource.close();
+            eventSourceRef.current = null;
+            
+            fetch(`${API_BASE_URL}/api/tasks/${taskId}/result`)
+              .then(res => {
+                if (!res.ok) {
+                  throw new Error(`HTTP error! status: ${res.status}`);
+                }
+                return res.json();
+              })
+              .then(result => {
+                console.log('📥 Fetched task result:', result);
+                
+                // 後端可能直接返回 result，或者包裝在 result.result 中
+                const analysisResult = result.result || result;
+                
+                console.log('📥 Analysis result structure:', {
+                  hasResult: !!result.result,
+                  hasAnalysisResult: !!analysisResult,
+                  analysisResultKeys: analysisResult ? Object.keys(analysisResult) : [],
+                  originalPapers: analysisResult?.originalPapers,
+                  hasOriginalPapers: !!analysisResult?.originalPapers,
+                  originalPapersKeys: analysisResult?.originalPapers ? Object.keys(analysisResult.originalPapers) : []
+                });
+                
+                // 檢查 graphData 或 graph 是否存在（後端可能使用不同的字段名）
+                // 優先檢查 graphData，如果沒有則檢查 graph
+                let graphData = analysisResult?.graphData || result.graphData;
+                if (!graphData) {
+                  // 後端可能使用 'graph' 而不是 'graphData'
+                  graphData = analysisResult?.graph || result.graph;
+                  if (graphData) {
+                    console.log('📊 Found graph data under "graph" field, converting to graphData');
+                  }
+                }
+                
+                if (graphData) {
+                  console.log('✅ Found graph data, processing result...');
+                  // 確保傳遞完整的 analysisResult，包含 graphData 和 originalPapers
+                  const finalResult = {
+                    ...analysisResult,
+                    graphData: graphData, // 統一使用 graphData 字段名
+                    success: result.success !== false && analysisResult?.success !== false,
+                    originalPapers: analysisResult?.originalPapers || result.originalPapers || {}
+                  };
+                  
+                  console.log('📦 Final result structure:', {
+                    hasGraphData: !!finalResult.graphData,
+                    hasOriginalPapers: !!finalResult.originalPapers,
+                    originalPapers: finalResult.originalPapers,
+                    priorWorks: finalResult.originalPapers?.priorWorks,
+                    derivativeWorks: finalResult.originalPapers?.derivativeWorks
+                  });
+                  
+                  handleAnalysisResult(finalResult, validUrls);
+                } else {
+                  const errorMsg = result.error || analysisResult?.error || 'No graph data found in result';
+                  console.error('❌ Result indicates failure:', errorMsg);
+                  console.error('❌ Available keys in result:', result.result ? Object.keys(result.result) : Object.keys(result));
+                  throw new Error(errorMsg);
+                }
+              })
+              .catch(err => {
+                console.error('❌ Error fetching result:', err);
+                setError(err.message || 'Analysis failed');
+                setIsLoading(false);
+                setProgress(0);
+                setProgressInfo(undefined);
+              });
+          } else if (data.type === 'failed') {
+            eventSource.close();
+            eventSourceRef.current = null;
+            setError(data.error || 'Analysis failed');
+            setIsLoading(false);
+          }
+        } catch (err) {
+          console.error('Error parsing SSE message:', err);
+        }
+      };
+
+      eventSource.onerror = (error) => {
+        console.error('SSE error:', error);
+        eventSource.close();
+        eventSourceRef.current = null;
+        setError('Connection to server lost');
+        setIsLoading(false);
+      };
+
+    } catch (error) {
+      console.error('Analysis error:', error);
+      setError(error instanceof Error ? error.message : 'Unknown error');
+      setIsLoading(false);
+      setProgress(0);
+      setProgressInfo(undefined);
+    }
+  };
+
+  // Handle analysis result (extracted from original code)
+  const handleAnalysisResult = (result: any, validUrls: string[]) => {
+    console.log('📊 Received analysis result:', result);
+    
+    // 更健壯的錯誤處理
+    if (!result) {
+      console.error('❌ Result is null or undefined');
+      throw new Error('No result received from server');
+    }
+    
+    // 檢查是否有錯誤信息
+    if (result.error) {
+      console.error('❌ Result contains error:', result.error);
+      throw new Error(result.error || 'Analysis failed');
+    }
+    
+    // 如果 success 明確為 false，拋出錯誤
+    if (result.success === false) {
+      console.error('❌ Analysis failed:', result.error || 'Unknown error');
+      throw new Error(result.error || 'Analysis failed');
+    }
+    
+    // 檢查 graphData 是否存在
+    if (!result.graphData) {
+      console.error('❌ No graphData in result:', result);
+      throw new Error('No graph data received from server');
+    }
+    
+    // 處理成功的結果
+    if (result.graphData) {
+      console.log('📊 Processing graph data:', result.graphData);
+      
+      // Transform result to match expected format
+      const transformedResult = {
+        success: result.success,
+        graphData: result.graphData,
+        originalPapers: result.originalPapers || {}
+      };
+      
+      // 保存原始论文 URLs
+      setOriginalPaperUrls(validUrls);
+      
+      // 保存 Prior Works 和 Derivative Works 数据
+      console.log('📚 Checking originalPapers:', {
+        hasOriginalPapers: !!transformedResult.originalPapers,
+        originalPapers: transformedResult.originalPapers,
+        priorWorks: transformedResult.originalPapers?.priorWorks,
+        derivativeWorks: transformedResult.originalPapers?.derivativeWorks,
+        priorWorksKeys: transformedResult.originalPapers?.priorWorks ? Object.keys(transformedResult.originalPapers.priorWorks) : [],
+        derivativeWorksKeys: transformedResult.originalPapers?.derivativeWorks ? Object.keys(transformedResult.originalPapers.derivativeWorks) : []
+      });
+      
+      if (transformedResult.originalPapers && 
+          (transformedResult.originalPapers.priorWorks || transformedResult.originalPapers.derivativeWorks)) {
+        console.log('📚 Received Prior/Derivative Works data:', transformedResult.originalPapers);
+        setPriorWorksData(transformedResult.originalPapers.priorWorks || {});
+        setDerivativeWorksData(transformedResult.originalPapers.derivativeWorks || {});
+        
+        // 合并所有原始论文的 Prior Works（去重并计算统计信息）
+        const mergedPriorWorks: Map<string, any> = new Map();
+        Object.values(transformedResult.originalPapers.priorWorks || {}).flat().forEach((work: any) => {
+          const key = work.id || work.title;
+          if (!mergedPriorWorks.has(key)) {
+            mergedPriorWorks.set(key, work);
+          } else {
+            const existing = mergedPriorWorks.get(key);
+            mergedPriorWorks.set(key, {
+              ...existing,
+              ...work,
+              authors: work.authors?.length > existing.authors?.length ? work.authors : existing.authors
+            });
+          }
+        });
+        
+        // 计算每个 prior work 的 graph citations 和 strength
+        const priorWorksWithStats = Array.from(mergedPriorWorks.values()).map((work: any) => {
+          const matchingNodes = transformedResult.graphData.nodes.filter((node: any) => {
+            const nodeTitle = (node.title || '').toLowerCase().trim();
+            const workTitle = (work.title || '').toLowerCase().trim();
+            return nodeTitle === workTitle || 
+                   nodeTitle.includes(workTitle.substring(0, 30)) || 
+                   workTitle.includes(nodeTitle.substring(0, 30));
+          });
+          
+          let citationCount = work.citationCount;
+          if ((citationCount === undefined || citationCount === null) && matchingNodes.length > 0) {
+            const firstMatchingNode = matchingNodes[0];
+            if (firstMatchingNode.citationCount !== undefined && firstMatchingNode.citationCount !== null) {
+              citationCount = firstMatchingNode.citationCount;
+            }
+          }
+          
+          let graphCitations = 0;
+          let totalStrength = 0;
+          let strengthCount = 0;
+          
+          matchingNodes.forEach((matchingNode: any) => {
+            const nodeId = matchingNode.id;
+            const incomingEdges = transformedResult.graphData.edges.filter((edge: any) => {
+              const targetId = typeof edge.target === 'string' ? edge.target : edge.target?.id;
+              return targetId === nodeId;
+            });
+            graphCitations += incomingEdges.length;
+            incomingEdges.forEach((edge: any) => {
+              if (edge.strength !== undefined && edge.strength !== null) {
+                totalStrength += edge.strength;
+                strengthCount++;
+              }
+            });
+          });
+          
+          const avgStrength = strengthCount > 0 ? totalStrength / strengthCount : 0;
+          
+          return {
+            ...work,
+            citationCount: citationCount || 0,
+            graphCitations,
+            avgStrength
+          };
+        });
+        
+        setAllPriorWorks(priorWorksWithStats);
+      }
+      
+      // 處理 graphData（保留原有邏輯）
+      setGraphData(transformedResult.graphData);
+      console.log('✅ Graph data set successfully');
+      
+      setIsLoading(false);
+      setProgress(100);
+      setProgressInfo({
+        progress: 100,
+        step: 'building',
+        currentStep: 'Analysis complete!',
+        details: `Successfully analyzed ${transformedResult.graphData.nodes.length} papers`
+      });
+      
+      // Clear progress after a short delay
+      setTimeout(() => {
+        setProgress(0);
+        setProgressInfo(undefined);
+      }, 2000);
+    }
+    // 注意：如果到達這裡，說明上面的檢查都通過了，應該不會執行到這裡
+    // 但為了安全起見，我們還是保留這個 else 分支
+  };
+  
+  // Old analysis function (kept for reference, but replaced by handleAnalyze)
+  // eslint-disable-next-line @typescript-eslint/no-unused-vars
+  // @ts-expect-error - Kept for reference only, not used
+  const _oldHandleAnalyze = async () => {
+    const validUrls = urls.filter(url => url.trim());
+    if (validUrls.length === 0) {
+      setError('Please enter at least one valid URL');
+      return;
+    }
+
+    setIsLoading(true);
+    setError(null);
+
+    try {
       const response = await fetch(`${API_BASE_URL}/api/graph/build-graph`, {
         method: 'POST',
         headers: {
@@ -544,30 +875,36 @@ const PaperGraphPage: React.FC = () => {
   // TODO: Obsidian sync functionality can be added later if needed
 
   return (
-    <div className="h-screen flex flex-col overflow-hidden bg-academic-cream">
+    <div className="h-screen flex flex-col overflow-hidden" style={{ backgroundColor: '#1e1e1e' }}>
       {/* Main Content Area - Uses flex-1 to automatically adjust height based on bottom section */}
-      <div className={`flex-1 min-h-0 grid gap-1 overflow-hidden ${isConfigCollapsed ? 'grid-cols-[50px_1fr]' : 'grid-cols-[320px_1fr]'}`}>
+      <div className={`flex-1 min-h-0 grid gap-1 overflow-hidden ${
+        isConfigCollapsed 
+          ? (showGuideSidebar ? 'grid-cols-[50px_1fr_350px]' : 'grid-cols-[50px_1fr]')
+          : (showGuideSidebar ? 'grid-cols-[320px_1fr_350px]' : 'grid-cols-[320px_1fr]')
+      }`}>
         
         {/* Left Column - Configuration */}
         <div className="h-full flex flex-col overflow-hidden min-w-0">
           {/* Analysis Configuration - Professional scrollable panel with Tailwind classes */}
           <div className="h-full min-h-0 overflow-y-auto overflow-x-hidden p-5 shadow-xl 
-                         bg-gradient-to-br from-academic-beige to-academic-beige/95
-                         border-r-2 border-academic-lightBeige 
+                         bg-gradient-to-br from-obsidian-card to-obsidian-hover
+                         border-r-2 border-obsidian-border 
                          rounded-tl-2xl rounded-bl-2xl
                          scrollbar-academic transition-all duration-300">
           {/* Header Section - Professional academic styling */}
-          <div className="flex items-center justify-between mb-5 pb-3 border-b-2 border-academic-purple/40">
+          <div className="flex items-center justify-between mb-5 pb-3 border-b-2" style={{ borderColor: 'rgba(100, 200, 100, 0.3)' }}>
             {!isConfigCollapsed && (
-              <h2 className="text-lg font-semibold font-serif text-academic-cream tracking-wide">
+              <h2 className="text-lg font-semibold tracking-wide" style={{ color: '#e8e8e8', fontFamily: '-apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif' }}>
                 Analysis Configuration
               </h2>
             )}
             <button
               onClick={() => setIsConfigCollapsed(!isConfigCollapsed)}
               className="ml-auto px-3 py-1.5 rounded-lg 
-                         bg-academic-lightBeige/80 hover:bg-academic-lightBeige
-                         text-academic-darkBrown text-sm font-medium
+                         text-sm font-medium
+                         style={{ backgroundColor: '#2d2d2d', color: '#64c864', border: '1px solid rgba(100, 200, 100, 0.2)' }}
+                         onMouseEnter={(e) => e.currentTarget.style.backgroundColor = '#252525'}
+                         onMouseLeave={(e) => e.currentTarget.style.backgroundColor = '#2d2d2d'}
                          transition-all duration-200 hover:shadow-md active:scale-95"
               title={isConfigCollapsed ? "Expand configuration panel" : "Collapse configuration panel"}
             >
@@ -580,13 +917,14 @@ const PaperGraphPage: React.FC = () => {
           {/* URL Input Section */}
           <div className="mb-6">
             <div className="flex items-center justify-between mb-3">
-              <h3 className="text-sm font-medium" style={{ color: '#F5F5DC' }}>Paper URLs</h3>
+              <h3 className="text-sm font-medium" style={{ color: '#e8e8e8' }}>Paper URLs</h3>
               <button
                 onClick={fillExampleUrls}
                 className="px-2 py-1 text-xs rounded hover:opacity-90 transition-colors"
                 style={{
-                  backgroundColor: '#D2CBBF',
-                  color: '#5D4037'
+                  backgroundColor: '#2d2d2d',
+                  color: '#64c864',
+                  border: '1px solid rgba(100, 200, 100, 0.2)'
                 }}
               >
                 <EditIcon className="w-3 h-3 mr-1" /> Examples
@@ -603,9 +941,9 @@ const PaperGraphPage: React.FC = () => {
                     placeholder={`Paper ${index + 1} URL`}
                     className="form-input w-full text-sm focus:outline-none"
                     style={{
-                      borderColor: '#D2CBBF',
-                      backgroundColor: '#F5F5DC',
-                      color: '#5D4037'
+                      borderColor: 'rgba(100, 200, 100, 0.2)',
+                      backgroundColor: '#252525',
+                      color: '#e8e8e8'
                     }}
                   />
                 </div>
@@ -615,8 +953,9 @@ const PaperGraphPage: React.FC = () => {
                     className="px-2 py-2 rounded text-xs hover:opacity-90"
                     title="Remove"
                     style={{
-                      backgroundColor: '#B89B74',
-                      color: '#F5F5DC'
+                      backgroundColor: '#2d2d2d',
+                      color: '#e8e8e8',
+                      border: '1px solid rgba(100, 200, 100, 0.2)'
                     }}
                   >
                     <DeleteIcon className="w-4 h-4" />
@@ -629,17 +968,18 @@ const PaperGraphPage: React.FC = () => {
               onClick={addUrl}
               className="w-full py-2 border border-dashed rounded text-sm transition-colors"
               style={{
-                borderColor: '#BDB4D3',
-                color: '#707C5D'
+                borderColor: 'rgba(100, 200, 100, 0.3)',
+                color: '#b8b8b8',
+                backgroundColor: 'transparent'
               }}
               onMouseEnter={(e) => {
-                e.currentTarget.style.borderColor = '#BDB4D3';
-                e.currentTarget.style.color = '#5D4037';
-                e.currentTarget.style.backgroundColor = '#D2CBBF';
+                e.currentTarget.style.borderColor = 'rgba(100, 200, 100, 0.5)';
+                e.currentTarget.style.color = '#64c864';
+                e.currentTarget.style.backgroundColor = '#2d2d2d';
               }}
               onMouseLeave={(e) => {
-                e.currentTarget.style.borderColor = '#BDB4D3';
-                e.currentTarget.style.color = '#707C5D';
+                e.currentTarget.style.borderColor = 'rgba(100, 200, 100, 0.3)';
+                e.currentTarget.style.color = '#b8b8b8';
                 e.currentTarget.style.backgroundColor = 'transparent';
               }}
             >
@@ -649,8 +989,8 @@ const PaperGraphPage: React.FC = () => {
 
           {/* Filter Toggle */}
           <div className="mb-4 p-3 rounded border" style={{
-            backgroundColor: 'var(--green-50)',
-            borderColor: 'var(--green-200)'
+            backgroundColor: '#252525',
+            borderColor: 'rgba(100, 200, 100, 0.2)'
           }}>
             <div className="flex items-center space-x-2">
               <input
@@ -659,16 +999,16 @@ const PaperGraphPage: React.FC = () => {
                 checked={filterSections}
                 onChange={(e) => setFilterSections(e.target.checked)}
                 className="w-4 h-4 rounded"
-                style={{ accentColor: '#BDB4D3' }}
+                style={{ accentColor: '#64c864' }}
               />
               <label htmlFor="filterSections" className="text-xs font-medium" style={{ 
-                color: '#5D4037',
-                fontFamily: '"Lora", "Merriweather", "Georgia", serif'
+                color: '#e8e8e8',
+                fontFamily: '-apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif'
               }}>
                 <FilterListIcon className="w-4 h-4 mr-1 inline" /> Smart Section Filter
               </label>
             </div>
-            <p className="text-xs mt-1" style={{ color: '#707C5D' }}>
+            <p className="text-xs mt-1" style={{ color: '#b8b8b8' }}>
               {filterSections 
                 ? 'Analyze key sections only (recommended)'
                 : 'Analyze all sections'
@@ -678,12 +1018,12 @@ const PaperGraphPage: React.FC = () => {
 
           {/* Network Expansion Depth */}
           <div className="mb-4 p-3 rounded border" style={{
-            backgroundColor: '#D2CBBF',
-            borderColor: '#A39A86'
+            backgroundColor: '#2d2d2d',
+            borderColor: 'rgba(100, 200, 100, 0.3)'
           }}>
             <span className="text-xs font-medium block mb-2" style={{ 
-              color: '#5D4037',
-              fontFamily: '"Lora", "Merriweather", "Georgia", serif'
+              color: '#e8e8e8',
+              fontFamily: '-apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif'
             }}>
               <NetworkCheckIcon className="w-4 h-4 mr-1 inline" /> Network Depth
             </span>
@@ -697,9 +1037,9 @@ const PaperGraphPage: React.FC = () => {
                     checked={expansionDepth === depth}
                     onChange={(e) => setExpansionDepth(parseInt(e.target.value))}
                     className="w-3 h-3"
-                    style={{ accentColor: '#BDB4D3' }}
+                    style={{ accentColor: '#64c864' }}
                   />
-                  <span className="text-xs" style={{ color: '#707C5D' }}>
+                  <span className="text-xs" style={{ color: '#b8b8b8' }}>
                     {depth === 0 && 'Source only'}
                     {depth === 1 && '1 layer deep'}
                     {depth === 2 && '2 layers deep'}
@@ -715,25 +1055,25 @@ const PaperGraphPage: React.FC = () => {
               onClick={() => setShowCitationExtractor(!showCitationExtractor)}
               className="flex items-center justify-between w-full p-3 border rounded text-sm transition-colors"
               style={{
-                backgroundColor: '#D2CBBF',
-                borderColor: '#A39A86',
-                color: '#5D4037',
-                fontFamily: '"Lora", "Merriweather", "Georgia", serif'
+                backgroundColor: '#2d2d2d',
+                borderColor: 'rgba(100, 200, 100, 0.3)',
+                color: '#e8e8e8',
+                fontFamily: '-apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif'
               }}
               onMouseEnter={(e) => {
-                e.currentTarget.style.backgroundColor = '#BDB4D3';
+                e.currentTarget.style.backgroundColor = '#252525';
               }}
               onMouseLeave={(e) => {
-                e.currentTarget.style.backgroundColor = '#D2CBBF';
+                e.currentTarget.style.backgroundColor = '#2d2d2d';
               }}
             >
               <span className="font-medium flex items-center gap-2">
                 <DescriptionIcon className="w-4 h-4" /> Citation Extractor
               </span>
               {showCitationExtractor ? (
-                <ExpandMoreIcon className="w-4 h-4" style={{ color: '#707C5D' }} />
+                <ExpandMoreIcon className="w-4 h-4" style={{ color: '#b8b8b8' }} />
               ) : (
-                <ExpandLessIcon className="w-4 h-4 rotate-180" style={{ color: '#707C5D' }} />
+                <ExpandLessIcon className="w-4 h-4 rotate-180" style={{ color: '#b8b8b8' }} />
               )}
             </button>
 
@@ -747,9 +1087,9 @@ const PaperGraphPage: React.FC = () => {
                     placeholder="Paper URL for citation extraction"
                     className="form-input flex-1 text-sm focus:outline-none"
                     style={{
-                      borderColor: '#A39A86',
-                      backgroundColor: '#F5F5DC',
-                      color: '#5D4037',
+                      borderColor: 'rgba(100, 200, 100, 0.3)',
+                      backgroundColor: '#2d2d2d',
+                      color: '#e8e8e8',
                       borderRadius: '8px',
                       padding: '8px 12px'
                     }}
@@ -759,19 +1099,35 @@ const PaperGraphPage: React.FC = () => {
                     disabled={isExtracting || !citationUrl}
                     className="btn-primary px-3 py-2 text-sm disabled:opacity-50 flex items-center justify-center gap-2 transition-all duration-200"
                     style={{
-                      backgroundColor: isExtracting || !citationUrl ? '#A39A86' : '#BDB4D3',
-                      color: '#F5F5DC',
+                      background: isExtracting || !citationUrl 
+                        ? '#252525' 
+                        : 'linear-gradient(135deg, #64c864 0%, #4ade80 100%)',
+                      color: isExtracting || !citationUrl ? '#888888' : '#1e1e1e',
                       borderRadius: '8px',
-                      border: 'none',
-                      fontFamily: '"Lora", "Merriweather", "Georgia", serif',
+                      border: isExtracting || !citationUrl ? '1px solid rgba(100, 200, 100, 0.2)' : 'none',
+                      fontFamily: '-apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif',
                       minWidth: '90px',
-                      cursor: isExtracting || !citationUrl ? 'not-allowed' : 'pointer'
+                      cursor: isExtracting || !citationUrl ? 'not-allowed' : 'pointer',
+                      fontWeight: 600,
+                      boxShadow: isExtracting || !citationUrl ? 'none' : '0 2px 8px rgba(100, 200, 100, 0.3)'
+                    }}
+                    onMouseEnter={(e) => {
+                      if (!isExtracting && citationUrl) {
+                        e.currentTarget.style.background = 'linear-gradient(135deg, #4ade80 0%, #22c55e 100%)';
+                        e.currentTarget.style.boxShadow = '0 4px 12px rgba(100, 200, 100, 0.4)';
+                      }
+                    }}
+                    onMouseLeave={(e) => {
+                      if (!isExtracting && citationUrl) {
+                        e.currentTarget.style.background = 'linear-gradient(135deg, #64c864 0%, #4ade80 100%)';
+                        e.currentTarget.style.boxShadow = '0 2px 8px rgba(100, 200, 100, 0.3)';
+                      }
                     }}
                   >
                     {isExtracting ? (
                       <>
-                        <svg className="animate-spin h-4 w-4" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" style={{ color: '#F5F5DC' }}>
-                          <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4" style={{ color: '#F5F5DC' }}></circle>
+                        <svg className="animate-spin h-4 w-4" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" style={{ color: '#1e1e1e' }}>
+                          <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4" style={{ color: '#1e1e1e' }}></circle>
                           <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z" style={{ color: '#F5F5DC' }}></path>
                         </svg>
                         <span>Extracting...</span>
@@ -784,13 +1140,13 @@ const PaperGraphPage: React.FC = () => {
                 
                 {citationResults && (
                   <div className="max-h-40 overflow-y-auto p-3 rounded text-xs" style={{
-                    backgroundColor: '#F5F5DC',
-                    border: '1px solid #A39A86',
+                    backgroundColor: '#252525',
+                    border: '1px solid rgba(100, 200, 100, 0.3)',
                     borderRadius: '8px'
                   }}>
                     <h4 className="font-semibold mb-2" style={{ 
-                      color: '#5D4037',
-                      fontFamily: '"Lora", "Merriweather", "Georgia", serif'
+                      color: '#e8e8e8',
+                      fontFamily: '-apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif'
                     }}>Extracted Citations ({citationResults.split('\n').length}):</h4>
                     <div className="space-y-1" style={{ fontFamily: 'monospace', fontSize: '11px' }}>
                       {(() => {
@@ -808,7 +1164,7 @@ const PaperGraphPage: React.FC = () => {
                             {remainingCount > 0 && !showAllCitations && (
                               <div 
                                 style={{ 
-                                  color: '#BDB4D3', 
+                                  color: '#64c864', 
                                   fontWeight: '600',
                                   marginTop: '4px',
                                   cursor: 'pointer',
@@ -816,7 +1172,7 @@ const PaperGraphPage: React.FC = () => {
                                 }}
                                 onClick={() => setShowAllCitations(true)}
                                 onMouseEnter={(e) => {
-                                  e.currentTarget.style.color = '#A39A86';
+                                  e.currentTarget.style.color = '#4ade80';
                                 }}
                                 onMouseLeave={(e) => {
                                   e.currentTarget.style.color = '#BDB4D3';
@@ -828,7 +1184,7 @@ const PaperGraphPage: React.FC = () => {
                             {showAllCitations && remainingCount > 0 && (
                               <div 
                                 style={{ 
-                                  color: '#BDB4D3', 
+                                  color: '#64c864', 
                                   fontWeight: '600',
                                   marginTop: '4px',
                                   cursor: 'pointer',
@@ -836,7 +1192,7 @@ const PaperGraphPage: React.FC = () => {
                                 }}
                                 onClick={() => setShowAllCitations(false)}
                                 onMouseEnter={(e) => {
-                                  e.currentTarget.style.color = '#A39A86';
+                                  e.currentTarget.style.color = '#4ade80';
                                 }}
                                 onMouseLeave={(e) => {
                                   e.currentTarget.style.color = '#BDB4D3';
@@ -861,25 +1217,25 @@ const PaperGraphPage: React.FC = () => {
               onClick={() => setShowObsidianSync(!showObsidianSync)}
               className="flex items-center justify-between w-full p-3 border rounded text-sm transition-colors"
               style={{
-                backgroundColor: '#D2CBBF',
-                borderColor: '#A39A86',
-                color: '#5D4037',
-                fontFamily: '"Lora", "Merriweather", "Georgia", serif'
+                backgroundColor: '#2d2d2d',
+                borderColor: 'rgba(100, 200, 100, 0.3)',
+                color: '#e8e8e8',
+                fontFamily: '-apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif'
               }}
               onMouseEnter={(e) => {
-                e.currentTarget.style.backgroundColor = '#BDB4D3';
+                e.currentTarget.style.backgroundColor = '#252525';
               }}
               onMouseLeave={(e) => {
-                e.currentTarget.style.backgroundColor = '#D2CBBF';
+                e.currentTarget.style.backgroundColor = '#2d2d2d';
               }}
             >
               <span className="font-medium flex items-center gap-2">
                 <SyncIcon className="w-4 h-4" /> Obsidian Sync
               </span>
               {showObsidianSync ? (
-                <ExpandMoreIcon className="w-4 h-4" style={{ color: '#707C5D' }} />
+                <ExpandMoreIcon className="w-4 h-4" style={{ color: '#b8b8b8' }} />
               ) : (
-                <ExpandLessIcon className="w-4 h-4 rotate-180" style={{ color: '#707C5D' }} />
+                <ExpandLessIcon className="w-4 h-4 rotate-180" style={{ color: '#b8b8b8' }} />
               )}
             </button>
 
@@ -893,9 +1249,9 @@ const PaperGraphPage: React.FC = () => {
                     placeholder="Obsidian vault path"
                     className="form-input w-full text-sm focus:outline-none"
                     style={{
-                      borderColor: '#A39A86',
-                      backgroundColor: '#F5F5DC',
-                      color: '#5D4037',
+                      borderColor: 'rgba(100, 200, 100, 0.3)',
+                      backgroundColor: '#2d2d2d',
+                      color: '#e8e8e8',
                       borderRadius: '8px',
                       padding: '8px 12px'
                     }}
@@ -907,9 +1263,9 @@ const PaperGraphPage: React.FC = () => {
                     placeholder="Subfolder name (optional)"
                     className="form-input w-full text-sm focus:outline-none"
                     style={{
-                      borderColor: '#A39A86',
-                      backgroundColor: '#F5F5DC',
-                      color: '#5D4037',
+                      borderColor: 'rgba(100, 200, 100, 0.3)',
+                      backgroundColor: '#2d2d2d',
+                      color: '#e8e8e8',
                       borderRadius: '8px',
                       padding: '8px 12px'
                     }}
@@ -926,21 +1282,35 @@ const PaperGraphPage: React.FC = () => {
             className="w-full px-4 py-3 rounded-lg font-medium transition-all flex items-center justify-center gap-2"
             style={{
               background: isLoading || urls.filter(u => u.trim()).length === 0 
-                ? '#A39A86' 
-                : 'linear-gradient(135deg, #BDB4D3 0%, #f2f3f0ff 100%)',
-              color: '#fafafaff',
+                ? '#252525' 
+                : 'linear-gradient(135deg, #64c864 0%, #4ade80 100%)',
+              color: isLoading || urls.filter(u => u.trim()).length === 0 ? '#888888' : '#1e1e1e',
               opacity: isLoading || urls.filter(u => u.trim()).length === 0 ? 0.6 : 1,
-              borderRadius: '20px',
-              border: 'none',
-              fontFamily: '"Lora", "Merriweather", "Georgia", serif',
-              cursor: isLoading || urls.filter(u => u.trim()).length === 0 ? 'not-allowed' : 'pointer'
+              borderRadius: '8px',
+              border: isLoading || urls.filter(u => u.trim()).length === 0 ? '1px solid rgba(100, 200, 100, 0.2)' : 'none',
+              fontFamily: '-apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif',
+              cursor: isLoading || urls.filter(u => u.trim()).length === 0 ? 'not-allowed' : 'pointer',
+              fontWeight: 600,
+              boxShadow: isLoading || urls.filter(u => u.trim()).length === 0 ? 'none' : '0 2px 8px rgba(100, 200, 100, 0.3)'
+            }}
+            onMouseEnter={(e) => {
+              if (!isLoading && urls.filter(u => u.trim()).length > 0) {
+                e.currentTarget.style.background = 'linear-gradient(135deg, #4ade80 0%, #22c55e 100%)';
+                e.currentTarget.style.boxShadow = '0 4px 12px rgba(100, 200, 100, 0.4)';
+              }
+            }}
+            onMouseLeave={(e) => {
+              if (!isLoading && urls.filter(u => u.trim()).length > 0) {
+                e.currentTarget.style.background = 'linear-gradient(135deg, #64c864 0%, #4ade80 100%)';
+                e.currentTarget.style.boxShadow = '0 2px 8px rgba(100, 200, 100, 0.3)';
+              }
             }}
           >
             {isLoading ? (
               <>
-                <svg className="animate-spin h-5 w-5" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" style={{ color: '#fafafaff' }}>
-                  <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4" style={{ color: '#fafafaff' }}></circle>
-                  <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z" style={{ color: '#fafafaff' }}></path>
+                <svg className="animate-spin h-5 w-5" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" style={{ color: '#1e1e1e' }}>
+                  <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4" style={{ color: '#1e1e1e' }}></circle>
+                  <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z" style={{ color: '#1e1e1e' }}></path>
                 </svg>
                 <span>Analyzing Papers...</span>
               </>
@@ -954,21 +1324,50 @@ const PaperGraphPage: React.FC = () => {
         </div>
 
         {/* Right Column - Main Content with Mode Switching */}
-        <div className="h-full overflow-hidden relative flex flex-col bg-[#F5F5DC]">
+        <div className="h-full overflow-hidden relative flex flex-col" style={{ backgroundColor: '#1e1e1e' }}>
+          {/* Guide Toggle Button - Fixed at top right */}
+          <button
+            onClick={() => setShowGuideSidebar(!showGuideSidebar)}
+            className="absolute top-4 right-4 z-50 px-4 py-2 rounded-lg transition-all duration-200 flex items-center gap-2"
+            style={{
+              backgroundColor: showGuideSidebar ? '#64c864' : '#2d2d2d',
+              color: showGuideSidebar ? '#1e1e1e' : '#64c864',
+              border: '1px solid rgba(100, 200, 100, 0.3)',
+              fontFamily: '-apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif',
+              fontWeight: 600,
+              fontSize: '14px',
+              boxShadow: showGuideSidebar ? '0 2px 8px rgba(100, 200, 100, 0.3)' : 'none'
+            }}
+            onMouseEnter={(e) => {
+              if (!showGuideSidebar) {
+                e.currentTarget.style.backgroundColor = '#252525';
+                e.currentTarget.style.borderColor = 'rgba(100, 200, 100, 0.5)';
+              }
+            }}
+            onMouseLeave={(e) => {
+              if (!showGuideSidebar) {
+                e.currentTarget.style.backgroundColor = '#2d2d2d';
+                e.currentTarget.style.borderColor = 'rgba(100, 200, 100, 0.3)';
+              }
+            }}
+          >
+            <BookIcon className="w-4 h-4" />
+            <span>{showGuideSidebar ? 'Hide Guide' : 'Show Guide'}</span>
+          </button>
         {/* Header with Mode Tabs */}
         {graphData && (
           <div className="border-b" style={{ 
-            borderColor: '#A39A86',
-            background: 'linear-gradient(135deg, #c6bdddff 0%, #BDB4D3 0%)'
+            borderColor: 'rgba(100, 200, 100, 0.3)',
+            background: 'linear-gradient(135deg, #64c864 0%, #4ade80 100%)'
           }}>
             <div className="flex items-center justify-center border-b" style={{ borderColor: '#A39A86' }}>
               <button
                 onClick={() => setViewMode('graph')}
                 className="px-6 py-3 text-sm font-medium transition-colors"
                 style={{
-                  backgroundColor: viewMode === 'graph' ? '#F5F5DC' : 'transparent',
-                  color: viewMode === 'graph' ? '#5D4037' : '#F5F5DC',
-                  borderBottom: viewMode === 'graph' ? '2px solid #BDB4D3' : '2px solid transparent',
+                  backgroundColor: viewMode === 'graph' ? '#2d2d2d' : 'transparent',
+                  color: viewMode === 'graph' ? '#64c864' : '#e8e8e8',
+                  borderBottom: viewMode === 'graph' ? '2px solid rgba(100, 200, 100, 0.5)' : '2px solid transparent',
             fontFamily: '"Lora", "Merriweather", "Georgia", serif'
                 }}
               >
@@ -978,10 +1377,10 @@ const PaperGraphPage: React.FC = () => {
                 onClick={() => setViewMode('prior-works')}
                 className="px-6 py-3 text-sm font-medium transition-colors"
                 style={{
-                  backgroundColor: viewMode === 'prior-works' ? '#F5F5DC' : 'transparent',
-                  color: viewMode === 'prior-works' ? '#5D4037' : '#F5F5DC',
+                  backgroundColor: viewMode === 'prior-works' ? '#2d2d2d' : 'transparent',
+                  color: viewMode === 'prior-works' ? '#64c864' : '#e8e8e8',
                   borderBottom: viewMode === 'prior-works' ? '2px solid #BDB4D3' : '2px solid transparent',
-                  fontFamily: '"Lora", "Merriweather", "Georgia", serif'
+                  fontFamily: '-apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif'
                 }}
               >
                 <MenuBookIcon className="w-4 h-4 mr-1 inline" /> Prior Works ({allPriorWorks.length})
@@ -990,10 +1389,10 @@ const PaperGraphPage: React.FC = () => {
                 onClick={() => setViewMode('derivative-works')}
                 className="px-6 py-3 text-sm font-medium transition-colors"
                 style={{
-                  backgroundColor: viewMode === 'derivative-works' ? '#F5F5DC' : 'transparent',
-                  color: viewMode === 'derivative-works' ? '#5D4037' : '#F5F5DC',
+                  backgroundColor: viewMode === 'derivative-works' ? '#2d2d2d' : 'transparent',
+                  color: viewMode === 'derivative-works' ? '#64c864' : '#e8e8e8',
                   borderBottom: viewMode === 'derivative-works' ? '2px solid #BDB4D3' : '2px solid transparent',
-                  fontFamily: '"Lora", "Merriweather", "Georgia", serif'
+                  fontFamily: '-apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif'
                 }}
               >
                 <LinkIcon className="w-4 h-4 mr-1 inline" /> Derivative Works ({allDerivativeWorks.length})
@@ -1004,22 +1403,66 @@ const PaperGraphPage: React.FC = () => {
         
         {/* Content Area - Switch based on view mode */}
         <div className="flex-1 overflow-hidden">
-          {graphData ? (
-            <>
-              {viewMode === 'graph' && (
-                <GraphVisualization 
-                  data={graphData} 
-                  onDataUpdate={setGraphData}
-                />
+          {viewMode === 'graph' && (
+            <div style={{ position: 'relative', width: '100%', height: '100%', display: 'flex', flexDirection: 'column' }}>
+              {/* Progress display - always show when loading, positioned appropriately */}
+              {isLoading && (
+                <div style={{
+                  position: graphData ? 'absolute' : 'relative',
+                  top: graphData ? '20px' : '20px',
+                  left: graphData ? '20px' : '20px',
+                  right: graphData ? '20px' : 'auto',
+                  zIndex: graphData ? 1000 : 10,
+                  width: graphData ? 'auto' : 'calc(100% - 40px)',
+                  maxWidth: '500px',
+                  margin: graphData ? '0' : '0'
+                }}>
+                  <AnalysisProgress
+                    progress={progress}
+                    progressInfo={progressInfo}
+                    isOverlay={!!graphData} // Overlay mode if graph already exists
+                  />
+                </div>
               )}
               
-              {viewMode === 'prior-works' && (
-                <div className="h-full overflow-y-auto p-6" style={{ backgroundColor: '#FFFFFF' }}>
+              {/* Graph visualization */}
+              {graphData ? (
+                <div style={{ flex: 1, position: 'relative', width: '100%', height: '100%' }}>
+                  <GraphVisualization 
+                    data={graphData} 
+                    onDataUpdate={setGraphData}
+                    isLoading={isLoading}
+                  />
+                </div>
+              ) : (
+                /* Empty state when no graph and not loading */
+                !isLoading && (
+                  <div style={{
+                    flex: 1,
+                    display: 'flex',
+                    alignItems: 'center',
+                    justifyContent: 'center',
+                    color: '#b8b8b8',
+                    fontFamily: '-apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif',
+                    fontSize: '18px'
+                  }}>
+                    <div style={{ textAlign: 'center' }}>
+                      <p style={{ marginBottom: '12px' }}>No graph data available</p>
+                      <p style={{ fontSize: '14px', opacity: 0.7 }}>Click "Start Analysis" to begin</p>
+                    </div>
+                  </div>
+                )
+              )}
+            </div>
+          )}
+          
+          {viewMode === 'prior-works' && (
+            <div className="h-full overflow-y-auto p-6" style={{ backgroundColor: '#1e1e1e' }}>
             <div className="mb-4">
-                    <h2 className="text-xl font-bold mb-2" style={{ color: '#5D4037', fontFamily: '"Lora", "Merriweather", "Georgia", serif' }}>
+                    <h2 className="text-xl font-bold mb-2" style={{ color: '#e8e8e8', fontFamily: '-apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif' }}>
                       Prior Works
                     </h2>
-                    <p className="text-sm mb-4" style={{ color: '#707C5D' }}>
+                    <p className="text-sm mb-4" style={{ color: '#b8b8b8' }}>
                       These are papers that were most commonly cited by the papers in the graph.
                       This usually means that they are <strong>important seminal works</strong> for this field and it could be a good idea to get familiar with them.
                   </p>
@@ -1027,12 +1470,12 @@ const PaperGraphPage: React.FC = () => {
                   
                   {allPriorWorks.length > 0 ? (
                     <div className="overflow-x-auto">
-                      <table className="w-full border-collapse" style={{ backgroundColor: '#FFFFFF' }}>
+                      <table className="w-full border-collapse" style={{ backgroundColor: '#1e1e1e' }}>
                         <thead>
-                          <tr style={{ borderBottom: '2px solid #BDB4D3', backgroundColor: '#F5F5DC' }}>
+                          <tr style={{ borderBottom: '2px solid rgba(100, 200, 100, 0.3)', backgroundColor: '#252525' }}>
                             <th 
-                              className="text-left p-3 text-sm font-semibold cursor-pointer select-none hover:bg-gray-100 transition-colors" 
-                              style={{ color: '#5D4037' }}
+                              className="text-left p-3 text-sm font-semibold cursor-pointer select-none hover:bg-obsidian-hover transition-colors" 
+                              style={{ color: '#e8e8e8' }}
                               onClick={() => {
                                 if (priorWorksSortField === 'title') {
                                   setPriorWorksSortDirection(priorWorksSortDirection === 'asc' ? 'desc' : 'asc');
@@ -1048,7 +1491,7 @@ const PaperGraphPage: React.FC = () => {
                                   <span 
                                     style={{ 
                                       opacity: priorWorksSortField === 'title' && priorWorksSortDirection === 'asc' ? 1 : 0.3,
-                                      color: '#5D4037'
+                                      color: '#e8e8e8'
                                     }}
                                   >
                                     ▲
@@ -1056,7 +1499,7 @@ const PaperGraphPage: React.FC = () => {
                                   <span 
                                     style={{ 
                                       opacity: priorWorksSortField === 'title' && priorWorksSortDirection === 'desc' ? 1 : 0.3,
-                                      color: '#5D4037'
+                                      color: '#e8e8e8'
                                     }}
                                   >
                                     ▼
@@ -1066,11 +1509,11 @@ const PaperGraphPage: React.FC = () => {
                             </th>
                             <th 
                               className="text-left p-3 text-sm font-semibold select-none" 
-                              style={{ color: '#5D4037' }}
+                              style={{ color: '#e8e8e8' }}
                             >
                               <div className="flex items-center gap-2">
                                 <div 
-                                  className="cursor-pointer hover:bg-gray-100 transition-colors px-1 py-1 rounded flex items-center gap-2"
+                                  className="cursor-pointer hover:bg-obsidian-hover transition-colors px-1 py-1 rounded flex items-center gap-2"
                                   onClick={() => {
                                     if (priorWorksSortField === 'lastAuthor') {
                                       setPriorWorksSortDirection(priorWorksSortDirection === 'asc' ? 'desc' : 'asc');
@@ -1090,7 +1533,7 @@ const PaperGraphPage: React.FC = () => {
                                     <span 
                                       style={{ 
                                         opacity: priorWorksSortField === 'lastAuthor' && priorWorksSortDirection === 'asc' ? 1 : 0.3,
-                                        color: '#5D4037'
+                                        color: '#e8e8e8'
                                       }}
                                     >
                                       ▲
@@ -1098,7 +1541,7 @@ const PaperGraphPage: React.FC = () => {
                                     <span 
                                       style={{ 
                                         opacity: priorWorksSortField === 'lastAuthor' && priorWorksSortDirection === 'desc' ? 1 : 0.3,
-                                        color: '#5D4037'
+                                        color: '#e8e8e8'
                                       }}
                                     >
                                       ▼
@@ -1116,17 +1559,17 @@ const PaperGraphPage: React.FC = () => {
                                   style={{
                                     width: '36px',
                                     height: '20px',
-                                    backgroundColor: showFirstAuthor ? '#BDB4D3' : '#D2CBBF',
+                                    backgroundColor: showFirstAuthor ? '#64c864' : '#2d2d2d',
                                     padding: '2px',
                                     border: 'none',
                                     cursor: 'pointer'
                                   }}
                                   title={showFirstAuthor ? 'Switch to Last author' : 'Switch to First author'}
                                   onMouseEnter={(e) => {
-                                    e.currentTarget.style.backgroundColor = showFirstAuthor ? '#A39A86' : '#BDB4D3';
+                                    e.currentTarget.style.backgroundColor = showFirstAuthor ? '#4ade80' : '#252525';
                                   }}
                                   onMouseLeave={(e) => {
-                                    e.currentTarget.style.backgroundColor = showFirstAuthor ? '#BDB4D3' : '#D2CBBF';
+                                    e.currentTarget.style.backgroundColor = showFirstAuthor ? '#64c864' : '#2d2d2d';
                                   }}
                                 >
                                   <div 
@@ -1142,8 +1585,8 @@ const PaperGraphPage: React.FC = () => {
         </div>
                             </th>
                             <th 
-                              className="text-left p-3 text-sm font-semibold cursor-pointer select-none hover:bg-gray-100 transition-colors" 
-                              style={{ color: '#5D4037' }}
+                              className="text-left p-3 text-sm font-semibold cursor-pointer select-none hover:bg-obsidian-hover transition-colors" 
+                              style={{ color: '#e8e8e8' }}
                               onClick={() => {
                                 if (priorWorksSortField === 'year') {
                                   setPriorWorksSortDirection(priorWorksSortDirection === 'asc' ? 'desc' : 'asc');
@@ -1159,7 +1602,7 @@ const PaperGraphPage: React.FC = () => {
                                   <span 
                                     style={{ 
                                       opacity: priorWorksSortField === 'year' && priorWorksSortDirection === 'asc' ? 1 : 0.3,
-                                      color: '#5D4037'
+                                      color: '#e8e8e8'
                                     }}
                                   >
                                     ▲
@@ -1167,7 +1610,7 @@ const PaperGraphPage: React.FC = () => {
                                   <span 
                                     style={{ 
                                       opacity: priorWorksSortField === 'year' && priorWorksSortDirection === 'desc' ? 1 : 0.3,
-                                      color: '#5D4037'
+                                      color: '#e8e8e8'
                                     }}
                                   >
                                     ▼
@@ -1176,8 +1619,8 @@ const PaperGraphPage: React.FC = () => {
                               </div>
                             </th>
                             <th 
-                              className="text-left p-3 text-sm font-semibold cursor-pointer select-none hover:bg-gray-100 transition-colors" 
-                              style={{ color: '#5D4037' }}
+                              className="text-left p-3 text-sm font-semibold cursor-pointer select-none hover:bg-obsidian-hover transition-colors" 
+                              style={{ color: '#e8e8e8' }}
                               onClick={() => {
                                 if (priorWorksSortField === 'citation') {
                                   setPriorWorksSortDirection(priorWorksSortDirection === 'asc' ? 'desc' : 'asc');
@@ -1193,7 +1636,7 @@ const PaperGraphPage: React.FC = () => {
                                   <span 
                                     style={{ 
                                       opacity: priorWorksSortField === 'citation' && priorWorksSortDirection === 'asc' ? 1 : 0.3,
-                                      color: '#5D4037'
+                                      color: '#e8e8e8'
                                     }}
                                   >
                                     ▲
@@ -1201,7 +1644,7 @@ const PaperGraphPage: React.FC = () => {
                                   <span 
                                     style={{ 
                                       opacity: priorWorksSortField === 'citation' && priorWorksSortDirection === 'desc' ? 1 : 0.3,
-                                      color: '#5D4037'
+                                      color: '#e8e8e8'
                                     }}
                                   >
                                     ▼
@@ -1210,8 +1653,8 @@ const PaperGraphPage: React.FC = () => {
                               </div>
                             </th>
                             <th 
-                              className="text-left p-3 text-sm font-semibold cursor-pointer select-none hover:bg-gray-100 transition-colors" 
-                              style={{ color: '#5D4037' }}
+                              className="text-left p-3 text-sm font-semibold cursor-pointer select-none hover:bg-obsidian-hover transition-colors" 
+                              style={{ color: '#e8e8e8' }}
                               onClick={() => {
                                 if (priorWorksSortField === 'strength') {
                                   setPriorWorksSortDirection(priorWorksSortDirection === 'asc' ? 'desc' : 'asc');
@@ -1227,7 +1670,7 @@ const PaperGraphPage: React.FC = () => {
                                   <span 
                                     style={{ 
                                       opacity: priorWorksSortField === 'strength' && priorWorksSortDirection === 'asc' ? 1 : 0.3,
-                                      color: '#5D4037'
+                                      color: '#e8e8e8'
                                     }}
                                   >
                                     ▲
@@ -1235,7 +1678,7 @@ const PaperGraphPage: React.FC = () => {
                                   <span 
                                     style={{ 
                                       opacity: priorWorksSortField === 'strength' && priorWorksSortDirection === 'desc' ? 1 : 0.3,
-                                      color: '#5D4037'
+                                      color: '#e8e8e8'
                                     }}
                                   >
                                     ▼
@@ -1288,24 +1731,24 @@ const PaperGraphPage: React.FC = () => {
                             .map((work, idx) => (
                             <tr 
                               key={work.id || idx}
-                              className="hover:bg-gray-50 transition-colors"
-                              style={{ borderBottom: '1px solid #D2CBBF' }}
+                              className="hover:bg-obsidian-hover transition-colors"
+                              style={{ borderBottom: '1px solid rgba(100, 200, 100, 0.1)' }}
                             >
-                              <td className="p-3 text-sm" style={{ color: '#5D4037' }}>
+                              <td className="p-3 text-sm" style={{ color: '#e8e8e8' }}>
                                 {work.title || 'Unknown Title'}
                               </td>
-                              <td className="p-3 text-sm" style={{ color: '#707C5D' }}>
+                              <td className="p-3 text-sm" style={{ color: '#e8e8e8' }}>
                                 {work.authors && work.authors.length > 0 
                                   ? (showFirstAuthor ? work.authors[0] : work.authors[work.authors.length - 1])
                                   : 'Unknown'}
                               </td>
-                              <td className="p-3 text-sm" style={{ color: '#707C5D' }}>
+                              <td className="p-3 text-sm" style={{ color: '#e8e8e8' }}>
                                 {work.year || 'Unknown'}
                               </td>
-                              <td className="p-3 text-sm" style={{ color: '#707C5D' }}>
+                              <td className="p-3 text-sm" style={{ color: '#e8e8e8' }}>
                                 {work.citationCount !== undefined ? work.citationCount.toLocaleString() : 'N/A'}
                               </td>
-                              <td className="p-3 text-sm" style={{ color: '#707C5D' }}>
+                              <td className="p-3 text-sm" style={{ color: '#e8e8e8' }}>
                                 {work.strength !== undefined ? work.strength.toFixed(3) : 'N/A'}
                               </td>
                             </tr>
@@ -1314,20 +1757,20 @@ const PaperGraphPage: React.FC = () => {
                       </table>
         </div>
                   ) : (
-                    <div className="text-center py-12" style={{ color: '#707C5D' }}>
+                    <div className="text-center py-12" style={{ color: '#b8b8b8' }}>
                       <p>No prior works found.</p>
                 </div>
               )}
             </div>
           )}
           
-              {viewMode === 'derivative-works' && (
-                <div className="h-full overflow-y-auto p-6" style={{ backgroundColor: '#FFFFFF' }}>
+          {viewMode === 'derivative-works' && (
+                <div className="h-full overflow-y-auto p-6" style={{ backgroundColor: '#1e1e1e' }}>
                   <div className="mb-4">
-                    <h2 className="text-xl font-bold mb-2" style={{ color: '#5D4037', fontFamily: '"Lora", "Merriweather", "Georgia", serif' }}>
+                    <h2 className="text-xl font-bold mb-2" style={{ color: '#e8e8e8', fontFamily: '-apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif' }}>
                       Derivative Works
                     </h2>
-                    <p className="text-sm mb-4" style={{ color: '#707C5D' }}>
+                    <p className="text-sm mb-4" style={{ color: '#b8b8b8' }}>
                       These are papers that cited many of the papers in the graph.
                       This usually means that they are either <strong>surveys of the field or recent relevant works</strong> which were inspired by many papers in the graph.
                     </p>
@@ -1335,12 +1778,12 @@ const PaperGraphPage: React.FC = () => {
         
                   {allDerivativeWorks.length > 0 ? (
                     <div className="overflow-x-auto">
-                      <table className="w-full border-collapse" style={{ backgroundColor: '#FFFFFF' }}>
+                      <table className="w-full border-collapse" style={{ backgroundColor: '#1e1e1e' }}>
                         <thead>
-                          <tr style={{ borderBottom: '2px solid #BDB4D3', backgroundColor: '#F5F5DC' }}>
+                          <tr style={{ borderBottom: '2px solid rgba(100, 200, 100, 0.3)', backgroundColor: '#252525' }}>
                             <th 
-                              className="text-left p-3 text-sm font-semibold cursor-pointer select-none hover:bg-gray-100 transition-colors" 
-                              style={{ color: '#5D4037' }}
+                              className="text-left p-3 text-sm font-semibold cursor-pointer select-none hover:bg-obsidian-hover transition-colors" 
+                              style={{ color: '#e8e8e8' }}
                               onClick={() => {
                                 if (derivativeWorksSortField === 'title') {
                                   setDerivativeWorksSortDirection(derivativeWorksSortDirection === 'asc' ? 'desc' : 'asc');
@@ -1356,7 +1799,7 @@ const PaperGraphPage: React.FC = () => {
                                   <span 
                                     style={{ 
                                       opacity: derivativeWorksSortField === 'title' && derivativeWorksSortDirection === 'asc' ? 1 : 0.3,
-                                      color: '#5D4037'
+                                      color: '#e8e8e8'
                                     }}
                                   >
                                     ▲
@@ -1364,7 +1807,7 @@ const PaperGraphPage: React.FC = () => {
                                   <span 
                                     style={{ 
                                       opacity: derivativeWorksSortField === 'title' && derivativeWorksSortDirection === 'desc' ? 1 : 0.3,
-                                      color: '#5D4037'
+                                      color: '#e8e8e8'
                                     }}
                                   >
                                     ▼
@@ -1374,11 +1817,11 @@ const PaperGraphPage: React.FC = () => {
                             </th>
                             <th 
                               className="text-left p-3 text-sm font-semibold select-none" 
-                              style={{ color: '#5D4037' }}
+                              style={{ color: '#e8e8e8' }}
                             >
                               <div className="flex items-center gap-2">
                                 <div 
-                                  className="cursor-pointer hover:bg-gray-100 transition-colors px-1 py-1 rounded flex items-center gap-2"
+                                  className="cursor-pointer hover:bg-obsidian-hover transition-colors px-1 py-1 rounded flex items-center gap-2"
                                   onClick={() => {
                                     if (derivativeWorksSortField === 'lastAuthor') {
                                       setDerivativeWorksSortDirection(derivativeWorksSortDirection === 'asc' ? 'desc' : 'asc');
@@ -1398,7 +1841,7 @@ const PaperGraphPage: React.FC = () => {
                                     <span 
                                       style={{ 
                                         opacity: derivativeWorksSortField === 'lastAuthor' && derivativeWorksSortDirection === 'asc' ? 1 : 0.3,
-                                        color: '#5D4037'
+                                        color: '#e8e8e8'
                                       }}
                                     >
                                       ▲
@@ -1406,7 +1849,7 @@ const PaperGraphPage: React.FC = () => {
                                     <span 
                                       style={{ 
                                         opacity: derivativeWorksSortField === 'lastAuthor' && derivativeWorksSortDirection === 'desc' ? 1 : 0.3,
-                                        color: '#5D4037'
+                                        color: '#e8e8e8'
                                       }}
                                     >
                                       ▼
@@ -1424,17 +1867,17 @@ const PaperGraphPage: React.FC = () => {
                                   style={{
                                     width: '36px',
                                     height: '20px',
-                                    backgroundColor: showDerivativeFirstAuthor ? '#BDB4D3' : '#D2CBBF',
+                                    backgroundColor: showDerivativeFirstAuthor ? '#64c864' : '#2d2d2d',
                                     padding: '2px',
                                     border: 'none',
                                     cursor: 'pointer'
                                   }}
                                   title={showDerivativeFirstAuthor ? 'Switch to Last author' : 'Switch to First author'}
                                   onMouseEnter={(e) => {
-                                    e.currentTarget.style.backgroundColor = showDerivativeFirstAuthor ? '#A39A86' : '#BDB4D3';
+                                    e.currentTarget.style.backgroundColor = showDerivativeFirstAuthor ? '#4ade80' : '#252525';
                                   }}
                                   onMouseLeave={(e) => {
-                                    e.currentTarget.style.backgroundColor = showDerivativeFirstAuthor ? '#BDB4D3' : '#D2CBBF';
+                                    e.currentTarget.style.backgroundColor = showDerivativeFirstAuthor ? '#64c864' : '#2d2d2d';
                                   }}
                                 >
                                   <div 
@@ -1450,8 +1893,8 @@ const PaperGraphPage: React.FC = () => {
                               </div>
                             </th>
                             <th 
-                              className="text-left p-3 text-sm font-semibold cursor-pointer select-none hover:bg-gray-100 transition-colors" 
-                              style={{ color: '#5D4037' }}
+                              className="text-left p-3 text-sm font-semibold cursor-pointer select-none hover:bg-obsidian-hover transition-colors" 
+                              style={{ color: '#e8e8e8' }}
                               onClick={() => {
                                 if (derivativeWorksSortField === 'year') {
                                   setDerivativeWorksSortDirection(derivativeWorksSortDirection === 'asc' ? 'desc' : 'asc');
@@ -1467,7 +1910,7 @@ const PaperGraphPage: React.FC = () => {
                                   <span 
                                     style={{ 
                                       opacity: derivativeWorksSortField === 'year' && derivativeWorksSortDirection === 'asc' ? 1 : 0.3,
-                                      color: '#5D4037'
+                                      color: '#e8e8e8'
                                     }}
                                   >
                                     ▲
@@ -1475,7 +1918,7 @@ const PaperGraphPage: React.FC = () => {
                                   <span 
                                     style={{ 
                                       opacity: derivativeWorksSortField === 'year' && derivativeWorksSortDirection === 'desc' ? 1 : 0.3,
-                                      color: '#5D4037'
+                                      color: '#e8e8e8'
                                     }}
                                   >
                                     ▼
@@ -1484,8 +1927,8 @@ const PaperGraphPage: React.FC = () => {
                               </div>
                             </th>
                             <th 
-                              className="text-left p-3 text-sm font-semibold cursor-pointer select-none hover:bg-gray-100 transition-colors" 
-                              style={{ color: '#5D4037' }}
+                              className="text-left p-3 text-sm font-semibold cursor-pointer select-none hover:bg-obsidian-hover transition-colors" 
+                              style={{ color: '#e8e8e8' }}
                               onClick={() => {
                                 if (derivativeWorksSortField === 'citation') {
                                   setDerivativeWorksSortDirection(derivativeWorksSortDirection === 'asc' ? 'desc' : 'asc');
@@ -1501,7 +1944,7 @@ const PaperGraphPage: React.FC = () => {
                                   <span 
                                     style={{ 
                                       opacity: derivativeWorksSortField === 'citation' && derivativeWorksSortDirection === 'asc' ? 1 : 0.3,
-                                      color: '#5D4037'
+                                      color: '#e8e8e8'
                                     }}
                                   >
                                     ▲
@@ -1509,7 +1952,7 @@ const PaperGraphPage: React.FC = () => {
                                   <span 
                                     style={{ 
                                       opacity: derivativeWorksSortField === 'citation' && derivativeWorksSortDirection === 'desc' ? 1 : 0.3,
-                                      color: '#5D4037'
+                                      color: '#e8e8e8'
                                     }}
                                   >
                                     ▼
@@ -1518,8 +1961,8 @@ const PaperGraphPage: React.FC = () => {
                               </div>
                             </th>
                             <th 
-                              className="text-left p-3 text-sm font-semibold cursor-pointer select-none hover:bg-gray-100 transition-colors" 
-                              style={{ color: '#5D4037' }}
+                              className="text-left p-3 text-sm font-semibold cursor-pointer select-none hover:bg-obsidian-hover transition-colors" 
+                              style={{ color: '#e8e8e8' }}
                               onClick={() => {
                                 if (derivativeWorksSortField === 'strength') {
                                   setDerivativeWorksSortDirection(derivativeWorksSortDirection === 'asc' ? 'desc' : 'asc');
@@ -1535,7 +1978,7 @@ const PaperGraphPage: React.FC = () => {
                                   <span 
                                     style={{ 
                                       opacity: derivativeWorksSortField === 'strength' && derivativeWorksSortDirection === 'asc' ? 1 : 0.3,
-                                      color: '#5D4037'
+                                      color: '#e8e8e8'
                                     }}
                                   >
                                     ▲
@@ -1543,7 +1986,7 @@ const PaperGraphPage: React.FC = () => {
                                   <span 
                                     style={{ 
                                       opacity: derivativeWorksSortField === 'strength' && derivativeWorksSortDirection === 'desc' ? 1 : 0.3,
-                                      color: '#5D4037'
+                                      color: '#e8e8e8'
                                     }}
                                   >
                                     ▼
@@ -1596,24 +2039,24 @@ const PaperGraphPage: React.FC = () => {
                             .map((work, idx) => (
                             <tr 
                               key={work.id || idx}
-                              className="hover:bg-gray-50 transition-colors"
-                              style={{ borderBottom: '1px solid #D2CBBF' }}
+                              className="hover:bg-obsidian-hover transition-colors"
+                              style={{ borderBottom: '1px solid rgba(100, 200, 100, 0.1)' }}
                             >
-                              <td className="p-3 text-sm" style={{ color: '#5D4037' }}>
+                              <td className="p-3 text-sm" style={{ color: '#e8e8e8' }}>
                                 {work.title || 'Unknown Title'}
                               </td>
-                              <td className="p-3 text-sm" style={{ color: '#707C5D' }}>
+                              <td className="p-3 text-sm" style={{ color: '#e8e8e8' }}>
                                 {work.authors && work.authors.length > 0 
                                   ? (showDerivativeFirstAuthor ? work.authors[0] : work.authors[work.authors.length - 1])
                                   : 'Unknown'}
                               </td>
-                              <td className="p-3 text-sm" style={{ color: '#707C5D' }}>
+                              <td className="p-3 text-sm" style={{ color: '#e8e8e8' }}>
                                 {work.year || 'Unknown'}
                               </td>
-                              <td className="p-3 text-sm" style={{ color: '#707C5D' }}>
+                              <td className="p-3 text-sm" style={{ color: '#e8e8e8' }}>
                                 {work.citationCount !== undefined ? work.citationCount.toLocaleString() : 'N/A'}
                               </td>
-                              <td className="p-3 text-sm" style={{ color: '#707C5D' }}>
+                              <td className="p-3 text-sm" style={{ color: '#e8e8e8' }}>
                                 {work.strength !== undefined ? work.strength.toFixed(2) : 'N/A'}
                               </td>
                             </tr>
@@ -1622,209 +2065,163 @@ const PaperGraphPage: React.FC = () => {
                       </table>
                     </div>
                   ) : (
-                    <div className="text-center py-12" style={{ color: '#707C5D' }}>
+                    <div className="text-center py-12" style={{ color: '#b8b8b8' }}>
                       <p>No derivative works found. This might take some time to search.</p>
                     </div>
                   )}
                 </div>
               )}
-            </>
-          ) : (
-            <div className="h-full flex items-center justify-center" style={{ backgroundColor: '#F5F5DC' }}>
-              <div className="text-center" style={{ color: '#707C5D' }}>
-                <div className="w-20 h-20 mx-auto mb-4 border-4 border-dashed rounded-full flex items-center justify-center" style={{ borderColor: '#BDB4D3' }}>
-                  <BarChartIcon className="w-10 h-10" style={{ color: '#BDB4D3' }} />
+          
+          {!graphData && !isLoading && (
+            <div className="h-full flex items-center justify-center" style={{ backgroundColor: '#1e1e1e' }}>
+              <div className="text-center" style={{ color: '#b8b8b8' }}>
+                <div className="w-20 h-20 mx-auto mb-4 border-4 border-dashed rounded-full flex items-center justify-center" style={{ borderColor: 'rgba(100, 200, 100, 0.3)' }}>
+                  <BarChartIcon className="w-10 h-10" style={{ color: '#64c864' }} />
                 </div>
                 <p className="text-lg font-medium" style={{ 
-                  color: '#5D4037',
-                  fontFamily: '"Lora", "Merriweather", "Georgia", serif'
+                  color: '#e8e8e8',
+                  fontFamily: '-apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif'
                 }}>Interactive Graph Area</p>
-                <p className="text-sm mt-2" style={{ color: '#707C5D' }}>Configure analysis parameters and click "Start Analysis" to visualize paper relationships</p>
+                <p className="text-sm mt-2" style={{ color: '#b8b8b8' }}>Configure analysis parameters and click "Start Analysis" to visualize paper relationships</p>
               </div>
             </div>
           )}
         </div>
       </div>
-    </div>
 
-      {/* Bottom Three-Column Information Section - Fixed at bottom with proper flex structure */}
-      <div 
-        className={`flex-shrink-0 relative transition-all duration-300 ease-in-out overflow-visible
-                   bg-gradient-to-b from-academic-lightBeige via-academic-lightBeige/95 to-academic-beige/90 
-                   border-t-2 border-academic-beige shadow-2xl
-                   ${showBottomSection ? 'h-[40vh] min-h-[40vh] max-h-[40vh]' : 'h-10 min-h-[40px] max-h-[40px]'}`}
-      >
-        {/* Collapse/Expand Button - Professional academic styling with backdrop, fixed high z-index */}
-        {/* Position dynamically adjusts based on left sidebar collapse state */}
-        <button
-          onClick={() => setShowBottomSection(!showBottomSection)}
-          className={`absolute top-0 -translate-y-1/2 z-[9999] cursor-pointer 
-                     transition-all duration-300 ease-in-out
-                     bg-gradient-to-br from-academic-purple via-purple-200 to-academic-purple
-                     hover:from-academic-beige hover:via-academic-purple/80 hover:to-academic-beige
-                     border-2 border-academic-beige/80 rounded-xl shadow-2xl backdrop-blur-sm
-                     px-6 py-3
-                     flex items-center justify-center gap-2
-                     font-serif font-semibold text-academic-darkBrown text-sm
-                     hover:shadow-2xl hover:scale-105 active:scale-95
-                     hover:border-academic-purple/100 pointer-events-auto
-                     ${isConfigCollapsed ? 'left-[calc(25px+50%)] -translate-x-1/2' : 'left-1/2 -translate-x-1/2'}`}
+      {/* Guide Sidebar - Right side sliding panel */}
+      {showGuideSidebar && (
+        <div 
+          className="h-full overflow-hidden border-l-2 transition-all duration-300 ease-in-out"
           style={{
-            left: isConfigCollapsed ? 'calc(50px + (100% - 50px) / 2)' : '50%',
-            transform: 'translate(-50%, -50%)'
+            backgroundColor: '#252525',
+            borderColor: 'rgba(100, 200, 100, 0.2)',
+            width: '350px',
+            minWidth: '350px'
           }}
-          title={showBottomSection ? 'Collapse guides to view more content' : 'Expand guides for help'}
         >
-          {showBottomSection ? (
-            <ExpandMoreIcon className="w-5 h-5" />
-          ) : (
-            <ExpandLessIcon className="w-5 h-5" />
-          )}
-          <span className="hidden sm:inline whitespace-nowrap">
-            {showBottomSection ? 'Collapse Guides' : 'Expand Guides'}
-          </span>
-        </button>
-        
-        {/* Content Area - Professional three-column academic panel layout */}
-        {showBottomSection && (
-          <div className="grid grid-cols-1 md:grid-cols-3 gap-2 pt-10 pb-3 px-2 h-full min-h-0 overflow-hidden relative z-0">
-        {/* Analysis Guide - Left */}
-            <div className="overflow-y-auto overflow-x-hidden p-5 shadow-inner bg-academic-cream h-full 
-                          scrollbar-academic transition-all duration-200 rounded-lg border border-academic-lightBeige/50">
+          <div className="h-full overflow-y-auto scrollbar-academic p-5">
+            {/* Close Button */}
+            <div className="flex items-center justify-between mb-5 pb-3 border-b-2" style={{ borderColor: 'rgba(100, 200, 100, 0.3)' }}>
               <h2 
-                className="text-lg font-semibold mb-4 pb-2" 
+                className="text-lg font-semibold"
                 style={{
-            color: '#5D4037',
-            borderBottom: '2px solid #BDB4D3',
-            fontFamily: '"Lora", "Merriweather", "Georgia", serif'
+                  color: '#e8e8e8',
+                  fontFamily: '-apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif'
                 }}
               >
-            Analysis Guide
-          </h2>
-          
-          {/* Usage Instructions */}
-          <div className="mb-6 p-4 rounded-lg border" style={{
-            backgroundColor: '#D2CBBF',
-            borderColor: '#A39A86'
-          }}>
-            <h3 className="text-sm font-semibold mb-3 flex items-center gap-2" style={{ 
-              color: '#5D4037',
-              fontFamily: '"Lora", "Merriweather", "Georgia", serif'
-            }}>
-              <BookIcon className="w-4 h-4" />
-              How to Use
-            </h3>
-            <ol className="text-xs space-y-2 list-decimal list-inside" style={{ color: '#707C5D' }}>
-              <li>Enter paper URLs in the left panel</li>
-              <li>Configure analysis parameters:
-                <ul className="ml-4 mt-1 list-disc list-inside space-y-1">
-                  <li>Smart filter: Analyze key sections only</li>
-                  <li>Network depth: How deep to explore</li>
-                </ul>
-              </li>
-              <li>Click "Start Analysis" to begin</li>
-              <li>Explore the interactive graph</li>
-              <li>Use advanced tools:
-                <ul className="ml-4 mt-1 list-disc list-inside space-y-1">
-                  <li>Citation Extractor: Extract citations from papers</li>
-                  <li>Obsidian Sync: Export to knowledge management</li>
-                </ul>
-              </li>
-            </ol>
-          </div>
-        </div>
+                Guide
+              </h2>
+              <button
+                onClick={() => setShowGuideSidebar(false)}
+                className="p-1 rounded transition-colors"
+                style={{
+                  color: '#b8b8b8',
+                  backgroundColor: 'transparent'
+                }}
+                onMouseEnter={(e) => {
+                  e.currentTarget.style.backgroundColor = '#2d2d2d';
+                  e.currentTarget.style.color = '#64c864';
+                }}
+                onMouseLeave={(e) => {
+                  e.currentTarget.style.backgroundColor = 'transparent';
+                  e.currentTarget.style.color = '#b8b8b8';
+                }}
+              >
+                <ExpandLessIcon className="w-5 h-5" />
+              </button>
+            </div>
 
-        {/* Key Features - Center */}
-            <div className="overflow-y-auto overflow-x-hidden p-5 shadow-inner bg-academic-cream h-full 
-                          scrollbar-academic transition-all duration-200 rounded-lg border border-academic-lightBeige/50">
-              <h2 
-                className="text-lg font-semibold mb-4 pb-2" 
-                style={{
-            color: '#5D4037',
-            borderBottom: '2px solid #BDB4D3',
-            fontFamily: '"Lora", "Merriweather", "Georgia", serif'
-                }}
-              >
-            Key Features
-          </h2>
-              
-          <div className="mb-6 p-4 rounded-lg border" style={{
-            backgroundColor: '#D2CBBF',
-            borderColor: '#A39A86'
-          }}>
-            <h3 className="text-sm font-semibold mb-3 flex items-center gap-2" style={{ 
-              color: '#5D4037',
-              fontFamily: '"Lora", "Merriweather", "Georgia", serif'
-            }}>
-              <AutoAwesomeIcon className="w-4 h-4" />
-              Overview
-            </h3>
-            <ul className="text-xs space-y-2" style={{ color: '#707C5D' }}>
-              <li className="flex items-start">
-                <PsychologyIcon className="w-4 h-4 mr-2 mt-0.5 flex-shrink-0" style={{ color: '#BDB4D3' }} />
-                <div>
-                  <strong>AI-Powered Analysis:</strong> Intelligent extraction of academic relationships
-                </div>
-              </li>
-              <li className="flex items-start">
-                <HubIcon className="w-4 h-4 mr-2 mt-0.5 flex-shrink-0" style={{ color: '#BDB4D3' }} />
-                <div>
-                  <strong>Network Visualization:</strong> Interactive graph showing citation networks
-                </div>
-              </li>
-              <li className="flex items-start">
-                <CenterFocusStrongIcon className="w-4 h-4 mr-2 mt-0.5 flex-shrink-0" style={{ color: '#BDB4D3' }} />
-                <div>
-                  <strong>Smart Filtering:</strong> Focus on key sections for better insights
-                </div>
-              </li>
-              <li className="flex items-start">
-                <LayersIcon className="w-4 h-4 mr-2 mt-0.5 flex-shrink-0" style={{ color: '#BDB4D3' }} />
-                <div>
-                  <strong>Multi-Layer Expansion:</strong> Explore citation relationships at multiple depths
-                </div>
-              </li>
-            </ul>
-          </div>
-        </div>
+            {/* Guide Content - Single column scrollable */}
+            <div className="space-y-4">
+              {/* How to Use */}
+              <div className="p-4 rounded-lg border" style={{
+                backgroundColor: '#2d2d2d',
+                borderColor: 'rgba(100, 200, 100, 0.3)'
+              }}>
+                <h3 className="text-sm font-semibold mb-3 flex items-center gap-2" style={{ 
+                  color: '#e8e8e8',
+                  fontFamily: '-apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif'
+                }}>
+                  <BookIcon className="w-4 h-4" />
+                  How to Use
+                </h3>
+                <ol className="text-xs space-y-2 list-decimal list-inside" style={{ color: '#b8b8b8' }}>
+                  <li>Enter paper URLs in the left panel</li>
+                  <li>Configure analysis parameters:
+                    <ul className="ml-4 mt-1 list-disc list-inside space-y-1">
+                      <li>Smart filter: Analyze key sections only</li>
+                      <li>Network depth: How deep to explore</li>
+                    </ul>
+                  </li>
+                  <li>Click "Start Analysis" to begin</li>
+                  <li>Explore the interactive graph</li>
+                  <li>Use advanced tools:
+                    <ul className="ml-4 mt-1 list-disc list-inside space-y-1">
+                      <li>Citation Extractor: Extract citations from papers</li>
+                      <li>Obsidian Sync: Export to knowledge management</li>
+                    </ul>
+                  </li>
+                </ol>
+              </div>
 
-        {/* Tips & Best Practices - Right */}
-            <div className="overflow-y-auto overflow-x-hidden p-5 shadow-inner bg-academic-cream h-full 
-                          scrollbar-academic transition-all duration-200 rounded-lg border border-academic-lightBeige/50">
-              <h2 
-                className="text-lg font-semibold mb-4 pb-2" 
-                style={{
-            color: '#5D4037',
-            borderBottom: '2px solid #BDB4D3',
-            fontFamily: '"Lora", "Merriweather", "Georgia", serif'
-                }}
-              >
-            Tips & Best Practices
-          </h2>
-              
-          <div className="mb-6 p-4 rounded-lg border" style={{
-            backgroundColor: '#D2CBBF',
-            borderColor: '#A39A86'
-          }}>
-            <h3 className="text-sm font-semibold mb-3 flex items-center gap-2" style={{ 
-              color: '#5D4037',
-              fontFamily: '"Lora", "Merriweather", "Georgia", serif'
-            }}>
-              <LightbulbIcon className="w-4 h-4" />
-              Tips
-            </h3>
-            <ul className="text-xs space-y-2" style={{ color: '#707C5D' }}>
-              <li>• Use arxiv.org URLs for best results</li>
-              <li>• Enable smart filtering to reduce noise</li>
-              <li>• Start with depth 1 for faster analysis</li>
-              <li>• Use citation extractor for manual verification</li>
-              <li>• Export to Obsidian for long-term knowledge management</li>
-            </ul>
+              {/* Key Features */}
+              <div className="p-4 rounded-lg border" style={{
+                backgroundColor: '#2d2d2d',
+                borderColor: 'rgba(100, 200, 100, 0.3)'
+              }}>
+                <h3 className="text-sm font-semibold mb-3 flex items-center gap-2" style={{ 
+                  color: '#e8e8e8',
+                  fontFamily: '-apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif'
+                }}>
+                  <AutoAwesomeIcon className="w-4 h-4" />
+                  Key Features
+                </h3>
+                <ul className="text-xs space-y-2" style={{ color: '#b8b8b8' }}>
+                  <li className="flex items-start">
+                    <PsychologyIcon className="w-4 h-4 mr-2 mt-0.5 flex-shrink-0" style={{ color: '#64c864' }} />
+                    <div><strong>AI-Powered Analysis:</strong> Intelligent extraction of academic relationships</div>
+                  </li>
+                  <li className="flex items-start">
+                    <HubIcon className="w-4 h-4 mr-2 mt-0.5 flex-shrink-0" style={{ color: '#64c864' }} />
+                    <div><strong>Network Visualization:</strong> Interactive graph showing citation networks</div>
+                  </li>
+                  <li className="flex items-start">
+                    <CenterFocusStrongIcon className="w-4 h-4 mr-2 mt-0.5 flex-shrink-0" style={{ color: '#64c864' }} />
+                    <div><strong>Smart Filtering:</strong> Focus on key sections for better insights</div>
+                  </li>
+                  <li className="flex items-start">
+                    <LayersIcon className="w-4 h-4 mr-2 mt-0.5 flex-shrink-0" style={{ color: '#64c864' }} />
+                    <div><strong>Multi-Layer Expansion:</strong> Explore citation relationships at multiple depths</div>
+                  </li>
+                </ul>
+              </div>
+
+              {/* Tips */}
+              <div className="p-4 rounded-lg border" style={{
+                backgroundColor: '#2d2d2d',
+                borderColor: 'rgba(100, 200, 100, 0.3)'
+              }}>
+                <h3 className="text-sm font-semibold mb-3 flex items-center gap-2" style={{ 
+                  color: '#e8e8e8',
+                  fontFamily: '-apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif'
+                }}>
+                  <LightbulbIcon className="w-4 h-4" />
+                  Tips & Best Practices
+                </h3>
+                <ul className="text-xs space-y-2" style={{ color: '#b8b8b8' }}>
+                  <li>• Use arxiv.org URLs for best results</li>
+                  <li>• Enable smart filtering to reduce noise</li>
+                  <li>• Start with depth 1 for faster analysis</li>
+                  <li>• Use citation extractor for manual verification</li>
+                  <li>• Export to Obsidian for long-term knowledge management</li>
+                </ul>
+              </div>
+            </div>
           </div>
         </div>
-          </div>
-        )}
-      </div>
+      )}
+    </div>
     </div>
   );
 };

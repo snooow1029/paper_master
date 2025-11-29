@@ -214,5 +214,89 @@ router.get('/', (req: Request, res: Response) => {
   }
 });
 
+/**
+ * SSE 流式获取任务进度
+ * GET /api/tasks/:taskId/stream
+ */
+router.get('/:taskId/stream', (req: Request, res: Response) => {
+  const { taskId } = req.params;
+  
+  // Set SSE headers
+  res.setHeader('Content-Type', 'text/event-stream');
+  res.setHeader('Cache-Control', 'no-cache');
+  res.setHeader('Connection', 'keep-alive');
+  res.setHeader('X-Accel-Buffering', 'no'); // Disable nginx buffering
+
+  // Send initial connection message
+  res.write(`data: ${JSON.stringify({ type: 'connected', taskId })}\n\n`);
+
+  // Check if task exists
+  const task = taskQueueService.getTask(taskId);
+  if (!task) {
+    res.write(`data: ${JSON.stringify({ type: 'error', message: 'Task not found' })}\n\n`);
+    res.end();
+    return;
+  }
+
+  // Send current status immediately
+  res.write(`data: ${JSON.stringify({
+    type: 'progress',
+    progress: task.progress,
+    progressInfo: task.progressInfo,
+    status: task.status
+  })}\n\n`);
+
+  // Listen for progress updates
+  const progressHandler = (updatedTask: any) => {
+    if (updatedTask.id === taskId) {
+      const data = {
+        type: 'progress',
+        progress: updatedTask.progress,
+        progressInfo: updatedTask.progressInfo,
+        status: updatedTask.status
+      };
+      res.write(`data: ${JSON.stringify(data)}\n\n`);
+    }
+  };
+
+  const completedHandler = (completedTask: any) => {
+    if (completedTask.id === taskId) {
+      res.write(`data: ${JSON.stringify({
+        type: 'completed',
+        progress: 100,
+        result: completedTask.data
+      })}\n\n`);
+      cleanup();
+    }
+  };
+
+  const failedHandler = (failedTask: any) => {
+    if (failedTask.id === taskId) {
+      res.write(`data: ${JSON.stringify({
+        type: 'failed',
+        error: failedTask.error
+      })}\n\n`);
+      cleanup();
+    }
+  };
+
+  const cleanup = () => {
+    taskQueueService.removeListener('task:progress', progressHandler);
+    taskQueueService.removeListener('task:completed', completedHandler);
+    taskQueueService.removeListener('task:failed', failedHandler);
+    res.end();
+  };
+
+  // Register event listeners
+  taskQueueService.on('task:progress', progressHandler);
+  taskQueueService.on('task:completed', completedHandler);
+  taskQueueService.on('task:failed', failedHandler);
+
+  // Handle client disconnect
+  req.on('close', () => {
+    cleanup();
+  });
+});
+
 export default router;
 

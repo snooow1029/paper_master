@@ -9,15 +9,17 @@ const MainLayout: React.FC<MainLayoutProps> = ({ children }) => {
   return (
     <Box sx={{ 
       flexGrow: 1,
-      color: '#5D4037',
-      backgroundColor: '#F5F5DC',
+      color: '#e8e8e8',
+      backgroundColor: '#1e1e1e',
       minHeight: '100vh'
     }}>
       <AppBar 
         position="static" 
         sx={{ 
-          backgroundColor: 'linear-gradient(135deg, #BDB4D3 0%, #707C5D 100%)',
-          background: 'linear-gradient(135deg, #BDB4D3 0%, #707C5D 100%)'
+          backgroundColor: '#252525',
+          background: '#252525',
+          borderBottom: '1px solid rgba(100, 200, 100, 0.2)',
+          boxShadow: '0 2px 8px rgba(0, 0, 0, 0.3)'
         }}
       >
         <Toolbar>
@@ -26,8 +28,10 @@ const MainLayout: React.FC<MainLayoutProps> = ({ children }) => {
             component="div" 
             sx={{ 
               flexGrow: 1,
-              fontFamily: '"Lora", "Merriweather", "Georgia", serif',
-              color: '#F5F5DC'
+              fontFamily: '-apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif',
+              color: '#e8e8e8',
+              fontWeight: 600,
+              letterSpacing: '0.3px'
             }}
           >
             Paper Master - Intelligent Paper Analysis System
@@ -36,9 +40,10 @@ const MainLayout: React.FC<MainLayoutProps> = ({ children }) => {
           <Typography 
             variant="body2" 
             sx={{ 
-              color: '#D2CBBF',
-              fontFamily: '"Lora", "Merriweather", "Georgia", serif',
-              marginLeft: 2
+              color: '#b8b8b8',
+              fontFamily: '-apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif',
+              marginLeft: 2,
+              fontSize: '0.85rem'
             }}
           >
              Citation Network Analysis |  Intelligent Section Filtering |  Relationship Graph Construction
@@ -49,7 +54,7 @@ const MainLayout: React.FC<MainLayoutProps> = ({ children }) => {
         component="main" 
         sx={{ 
           p: 3,
-          backgroundColor: '#F5F5DC',
+          backgroundColor: '#1e1e1e',
           minHeight: 'calc(100vh - 64px)'
         }}
       >
