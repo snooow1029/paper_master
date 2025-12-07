@@ -182,8 +182,12 @@ export class AnalysisSaveService {
     const relationsToSave: PaperRelation[] = [];
     console.log(`💾 Saving ${graphData.edges.length} edges as PaperRelation`);
     for (const edge of graphData.edges) {
-      const fromPaperId = paperIdMap.get(edge.from);
-      const toPaperId = paperIdMap.get(edge.to);
+      // Support both 'from/to' and 'source/target' formats
+      const fromId = edge.from || (typeof edge.source === 'string' ? edge.source : (edge.source as any)?.id);
+      const toId = edge.to || (typeof edge.target === 'string' ? edge.target : (edge.target as any)?.id);
+      
+      const fromPaperId = paperIdMap.get(fromId);
+      const toPaperId = paperIdMap.get(toId);
 
       if (fromPaperId && toPaperId) {
         const fromPaper = savedPapers.find(p => p.id === fromPaperId);
@@ -202,18 +206,19 @@ export class AnalysisSaveService {
             const relation = paperRelationRepository.create({
               fromPaper,
               toPaper,
-              relationship: edge.label || 'related',
-              description: edge.label || '',
+              relationship: edge.label || edge.relationship || 'related',
+              description: edge.description || edge.label || edge.relationship || '',
               confidence: 1.0,
               weight: 1,
             });
             relationsToSave.push(relation);
           }
         } else {
-          console.warn(`⚠️ Could not find papers for edge: ${edge.from} -> ${edge.to}`);
+          console.warn(`⚠️ Could not find papers for edge: ${fromId} -> ${toId}`);
         }
       } else {
-        console.warn(`⚠️ Could not map edge IDs: ${edge.from} -> ${edge.to}`);
+        console.warn(`⚠️ Could not map edge IDs: ${fromId} -> ${toId} (fromPaperId: ${fromPaperId}, toPaperId: ${toPaperId})`);
+        console.warn(`   Edge data:`, JSON.stringify(edge, null, 2));
       }
     }
 
@@ -321,13 +326,20 @@ export class AnalysisSaveService {
         id: paperIdMap.get(n.id) || n.id,
         label: n.label || '',
       })),
-      edges: graphData.edges.map(e => ({
-        ...e,
-        id: e.id,
-        from: paperIdMap.get(e.from) || e.from,
-        to: paperIdMap.get(e.to) || e.to,
-        label: e.label || '',
-      })),
+      edges: graphData.edges.map(e => {
+        // Support both 'from/to' and 'source/target' formats
+        const fromId = e.from || (typeof e.source === 'string' ? e.source : (e.source as any)?.id);
+        const toId = e.to || (typeof e.target === 'string' ? e.target : (e.target as any)?.id);
+        const mappedFrom = paperIdMap.get(fromId) || fromId;
+        const mappedTo = paperIdMap.get(toId) || toId;
+        return {
+          ...e,
+          id: e.id || `${mappedFrom}-${mappedTo}`,
+          from: mappedFrom,
+          to: mappedTo,
+          label: e.label || e.relationship || '',
+        };
+      }),
     };
 
     console.log(`💾 Updating session ${sessionId} with ${relationshipGraph.nodes.length} nodes and ${relationshipGraph.edges.length} edges`);
@@ -370,8 +382,12 @@ export class AnalysisSaveService {
     // Then, create new relations from graphData edges
     const relationsToSave: PaperRelation[] = [];
     for (const edge of graphData.edges) {
-      const fromPaperId = paperIdMap.get(edge.from);
-      const toPaperId = paperIdMap.get(edge.to);
+      // Support both 'from/to' and 'source/target' formats
+      const fromId = edge.from || (typeof edge.source === 'string' ? edge.source : (edge.source as any)?.id);
+      const toId = edge.to || (typeof edge.target === 'string' ? edge.target : (edge.target as any)?.id);
+      
+      const fromPaperId = paperIdMap.get(fromId);
+      const toPaperId = paperIdMap.get(toId);
 
       if (fromPaperId && toPaperId) {
         const fromPaper = existingPapers.find(p => p.id === fromPaperId);
@@ -381,8 +397,8 @@ export class AnalysisSaveService {
           const relation = paperRelationRepository.create({
             fromPaper,
             toPaper,
-            relationship: edge.label || 'related',
-            description: edge.label || '',
+            relationship: edge.label || edge.relationship || 'related',
+            description: edge.description || edge.label || edge.relationship || '',
             confidence: 1.0,
             weight: 1,
           });
