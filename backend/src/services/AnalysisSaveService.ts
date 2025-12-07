@@ -411,20 +411,57 @@ export class AnalysisSaveService {
     console.log(`\n🟢 ========== GET SESSION GRAPH DATA START ==========`);
     console.log(`📥 Loading session: ${sessionId}`);
     
-    const analysisRepository = AppDataSource.getRepository(Analysis);
     const sessionRepository = AppDataSource.getRepository(Session);
 
+    // 1. 讀取 Session
     const session = await sessionRepository.findOne({
       where: { id: sessionId },
       relations: ['analyses', 'analyses.paper'],
     });
 
-    if (!session || !session.analyses || session.analyses.length === 0) {
-      console.log(`❌ Session not found or has no analyses`);
+    if (!session) {
+      console.log(`❌ Session not found`);
       return null;
     }
 
-    console.log(`📊 Found session with ${session.analyses.length} analyses`);
+    // =========== 優先讀取 Snapshot ===========
+    // 如果有 graphSnapshot (代表這是使用者編輯過或儲存過的畫面)，直接回傳這個 JSON
+    if (session.graphSnapshot) {
+      try {
+        console.log(`💾 Found graphSnapshot, returning saved UI state directly.`);
+        const snapshotData = JSON.parse(session.graphSnapshot);
+        
+        // 建議再次 Normalize 確保 ID 格式統一 (全部轉字串)
+        const normalizedSnapshot = this.normalizeGraphData(snapshotData);
+        
+        console.log(`📥 Returning snapshot: ${normalizedSnapshot.nodes.length} nodes, ${normalizedSnapshot.edges.length} edges`);
+        if (normalizedSnapshot.edges.length > 0) {
+          console.log(`📥 Snapshot edges sample (first 3):`, normalizedSnapshot.edges.slice(0, 3).map((e: any) => ({
+            id: e.id,
+            from: e.from,
+            to: e.to,
+            label: e.label
+          })));
+        }
+        console.log(`🟢 ========== GET SESSION GRAPH DATA END ==========\n`);
+        return normalizedSnapshot;
+      } catch (error) {
+        console.error("❌ Error parsing graphSnapshot, falling back to analysis merging:", error);
+        // 如果 JSON 解析失敗，才執行下面的 Fallback 邏輯
+      }
+    }
+    // =========== Snapshot 讀取結束 ===========
+
+    // --- 下面是原本的 Fallback 邏輯 (只有當 graphSnapshot 不存在時才會執行) ---
+    
+    if (!session.analyses || session.analyses.length === 0) {
+      console.log(`❌ Session has no analyses and no snapshot`);
+      return null;
+    }
+
+    console.log(`📊 Found session with ${session.analyses.length} analyses (Using legacy merge)`);
+    
+    const analysisRepository = AppDataSource.getRepository(Analysis);
 
     // Combine all relationship graphs from analyses
     // Since all analyses should have the same complete graph, we can use the first one
@@ -535,8 +572,12 @@ export class AnalysisSaveService {
       throw new Error('Session not found');
     }
 
+    // 建議加入這行：先正規化再儲存
+    const normalizedData = this.normalizeGraphData(graphData);
+    console.log(`🔄 Normalized graphData before saving: ${normalizedData.nodes.length} nodes, ${normalizedData.edges.length} edges`);
+
     // Update graphSnapshot in Session (Snapshot Layer)
-    session.graphSnapshot = JSON.stringify(graphData);
+    session.graphSnapshot = JSON.stringify(normalizedData); // 使用 normalizedData
     await sessionRepository.save(session);
     console.log(`💾 Updated graphSnapshot in Session ${sessionId}`);
 
@@ -548,17 +589,17 @@ export class AnalysisSaveService {
     });
 
     console.log(`📊 Existing papers in session: ${existingPapers.length}`);
-    console.log(`📊 GraphData to save: ${graphData.nodes.length} nodes, ${graphData.edges.length} edges`);
+    console.log(`📊 NormalizedData to save: ${normalizedData.nodes.length} nodes, ${normalizedData.edges.length} edges`);
     
     // Filter nodes to only include existing papers (handle deleted nodes)
     const validNodeIds = new Set(existingPapers.map(p => p.id));
-    const filteredNodes = graphData.nodes.filter(n => {
+    const filteredNodes = normalizedData.nodes.filter(n => {
       const nodeId = paperIdMap.get(n.id) || n.id;
       return validNodeIds.has(nodeId);
     });
     
     // Filter edges to only include edges between existing papers (handle deleted nodes)
-    const filteredEdges = graphData.edges.filter(e => {
+    const filteredEdges = normalizedData.edges.filter(e => {
       const edgeAny = e as any;
       const fromId = edgeAny.from || (typeof edgeAny.source === 'string' ? edgeAny.source : (edgeAny.source as any)?.id);
       const toId = edgeAny.to || (typeof edgeAny.target === 'string' ? edgeAny.target : (edgeAny.target as any)?.id);
@@ -624,7 +665,7 @@ export class AnalysisSaveService {
       if (analysis) {
         // Update existing analysis with complete graph
         analysis.relationshipGraph = relationshipGraph;
-        console.log(`  Updating Analysis ${analysis.id} for paper ${paper.id} with ${relationshipGraph.edges.length} edges`);
+        // console.log(`  Updating Analysis ${analysis.id} for paper ${paper.id} with ${relationshipGraph.edges.length} edges`);
       } else {
         // Create new analysis with complete graph
         analysis = analysisRepository.create({
@@ -650,9 +691,9 @@ export class AnalysisSaveService {
       .where('fromPaperId IN (:...paperIds) OR toPaperId IN (:...paperIds)', { paperIds })
       .execute();
 
-    // Then, create new relations from graphData edges
+    // Then, create new relations from normalizedData edges
     const relationsToSave: PaperRelation[] = [];
-    for (const edge of graphData.edges) {
+    for (const edge of filteredEdges) {
       // Support both 'from/to' and 'source/target' formats
       const fromId = edge.from || (typeof edge.source === 'string' ? edge.source : (edge.source as any)?.id);
       const toId = edge.to || (typeof edge.target === 'string' ? edge.target : (edge.target as any)?.id);
@@ -685,7 +726,7 @@ export class AnalysisSaveService {
     }
 
     // Build Knowledge Graph Layer (Many-to-Many relationships)
-    await this.buildKnowledgeGraph(graphData, existingPapers, paperIdMap);
+    await this.buildKnowledgeGraph(normalizedData, existingPapers, paperIdMap);
     console.log(`✅ Updated knowledge graph`);
 
     // Update session timestamp
