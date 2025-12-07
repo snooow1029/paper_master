@@ -214,19 +214,12 @@ export class AnalysisSaveService {
         continue;
       }
 
-      // Get edges related to this paper
-      // Support both 'from/to' and 'source/target' formats
-      const nodeId = node.id;
-      const relatedEdges = graphData.edges.filter(e => {
-        const edgeAny = e as any;
-        const fromId = edgeAny.from || (typeof e.source === 'string' ? e.source : (e.source as any)?.id);
-        const toId = edgeAny.to || (typeof e.target === 'string' ? e.target : (e.target as any)?.id);
-        return fromId === nodeId || toId === nodeId;
-      });
-      
-      console.log(`📊 Paper ${savedPaper.id}: Found ${relatedEdges.length} related edges out of ${graphData.edges.length} total edges`);
+      // IMPORTANT: Save complete graph (all nodes and all edges) for each Analysis
+      // This ensures consistency when reading back - each Analysis has the full context
+      // The original design saved only relatedEdges, but this causes issues when merging
+      console.log(`📊 Paper ${savedPaper.id}: Saving complete graph with ${graphData.nodes.length} nodes and ${graphData.edges.length} edges`);
 
-      // Create relationship graph for this paper
+      // Create relationship graph with ALL nodes and ALL edges (not just related ones)
       const relationshipGraph = {
         nodes: graphData.nodes.map(n => {
           const mappedId = paperIdMap.get(n.id) || n.id;
@@ -236,7 +229,7 @@ export class AnalysisSaveService {
             label: n.label,
           };
         }),
-        edges: relatedEdges.map(e => {
+        edges: graphData.edges.map(e => {
           // Support both 'from/to' and 'source/target' formats
           const edgeAny = e as any;
           const fromId = edgeAny.from || (typeof e.source === 'string' ? e.source : (e.source as any)?.id);
@@ -554,15 +547,37 @@ export class AnalysisSaveService {
       paperIdMap.set(paper.id, paper.id);
     });
 
-    // Create a single relationship graph with ALL nodes and edges
-    // This ensures we preserve the complete graph structure
+    console.log(`📊 Existing papers in session: ${existingPapers.length}`);
+    console.log(`📊 GraphData to save: ${graphData.nodes.length} nodes, ${graphData.edges.length} edges`);
+    
+    // Filter nodes to only include existing papers (handle deleted nodes)
+    const validNodeIds = new Set(existingPapers.map(p => p.id));
+    const filteredNodes = graphData.nodes.filter(n => {
+      const nodeId = paperIdMap.get(n.id) || n.id;
+      return validNodeIds.has(nodeId);
+    });
+    
+    // Filter edges to only include edges between existing papers (handle deleted nodes)
+    const filteredEdges = graphData.edges.filter(e => {
+      const edgeAny = e as any;
+      const fromId = edgeAny.from || (typeof edgeAny.source === 'string' ? edgeAny.source : (edgeAny.source as any)?.id);
+      const toId = edgeAny.to || (typeof edgeAny.target === 'string' ? edgeAny.target : (edgeAny.target as any)?.id);
+      const mappedFrom = paperIdMap.get(fromId) || fromId;
+      const mappedTo = paperIdMap.get(toId) || toId;
+      return validNodeIds.has(mappedFrom) && validNodeIds.has(mappedTo);
+    });
+    
+    console.log(`📊 After filtering (removed deleted nodes/edges): ${filteredNodes.length} nodes, ${filteredEdges.length} edges`);
+
+    // Create a single relationship graph with filtered nodes and edges
+    // This ensures we preserve the complete graph structure while handling deletions
     const relationshipGraph = {
-      nodes: graphData.nodes.map(n => ({
+      nodes: filteredNodes.map(n => ({
         ...n,
         id: paperIdMap.get(n.id) || n.id,
         label: n.label || '',
       })),
-      edges: graphData.edges.map(e => {
+      edges: filteredEdges.map(e => {
         // Support both 'from/to' and 'source/target' formats
         const edgeAny = e as any;
         const fromId = edgeAny.from || (typeof edgeAny.source === 'string' ? edgeAny.source : (edgeAny.source as any)?.id);
