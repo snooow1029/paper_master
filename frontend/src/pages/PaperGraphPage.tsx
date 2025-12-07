@@ -69,6 +69,16 @@ const PaperGraphPage: React.FC<PaperGraphPageProps> = ({ setSessionHandler }) =>
   const eventSourceRef = useRef<EventSource | null>(null);
   const saveTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   
+  // Cleanup timeout on unmount and save pending changes
+  useEffect(() => {
+    return () => {
+      if (saveTimeoutRef.current) {
+        clearTimeout(saveTimeoutRef.current);
+        saveTimeoutRef.current = null;
+      }
+    };
+  }, []);
+  
   // 保存用户输入的原始论文 URLs（用于 Prior/Derivative Works）
   const [_originalPaperUrls, setOriginalPaperUrls] = useState<string[]>([]);
   
@@ -435,8 +445,9 @@ const PaperGraphPage: React.FC<PaperGraphPageProps> = ({ setSessionHandler }) =>
   };
 
   // Update current session with edited graph data
-  const updateCurrentSession = async () => {
-    if (!isAuthenticated() || !currentSessionId || !graphData) {
+  const updateCurrentSession = async (dataToSave?: GraphData) => {
+    const data = dataToSave || graphData;
+    if (!isAuthenticated() || !currentSessionId || !data) {
       console.log('Cannot update: not authenticated or no session or no graphData');
       return;
     }
@@ -448,7 +459,7 @@ const PaperGraphPage: React.FC<PaperGraphPageProps> = ({ setSessionHandler }) =>
         return;
       }
 
-      console.log(`💾 Updating session ${currentSessionId} with ${graphData.nodes?.length || 0} nodes and ${graphData.edges?.length || 0} edges`);
+      console.log(`💾 Updating session ${currentSessionId} with ${data.nodes?.length || 0} nodes and ${data.edges?.length || 0} edges`);
 
       const updateResponse = await fetch(`${API_BASE_URL}/api/sessions/${currentSessionId}/update-graph`, {
         method: 'PUT',
@@ -457,7 +468,7 @@ const PaperGraphPage: React.FC<PaperGraphPageProps> = ({ setSessionHandler }) =>
           'Content-Type': 'application/json',
         },
         body: JSON.stringify({
-          graphData: graphData,
+          graphData: data,
         }),
       });
 
@@ -534,8 +545,9 @@ const PaperGraphPage: React.FC<PaperGraphPageProps> = ({ setSessionHandler }) =>
         clearTimeout(saveTimeoutRef.current);
       }
       // Debounce: wait 2 seconds after last edit before saving
+      // Pass updatedData directly to ensure we save the latest changes
       saveTimeoutRef.current = setTimeout(() => {
-        updateCurrentSession();
+        updateCurrentSession(updatedData);
         saveTimeoutRef.current = null;
       }, 2000);
     }

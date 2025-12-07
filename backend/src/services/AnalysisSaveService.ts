@@ -511,6 +511,12 @@ export class AnalysisSaveService {
     };
 
     console.log(`💾 Updating session ${sessionId} with ${relationshipGraph.nodes.length} nodes and ${relationshipGraph.edges.length} edges`);
+    console.log(`📊 RelationshipGraph edges sample:`, relationshipGraph.edges.slice(0, 3).map(e => ({
+      id: e.id,
+      from: e.from || e.source,
+      to: e.to || e.target,
+      label: e.label
+    })));
 
     // Update all Analysis records with the complete graph data
     const updatedAnalyses: Analysis[] = [];
@@ -524,6 +530,7 @@ export class AnalysisSaveService {
       if (analysis) {
         // Update existing analysis with complete graph
         analysis.relationshipGraph = relationshipGraph;
+        console.log(`  Updating Analysis ${analysis.id} for paper ${paper.id} with ${relationshipGraph.edges.length} edges`);
       } else {
         // Create new analysis with complete graph
         analysis = analysisRepository.create({
@@ -531,12 +538,14 @@ export class AnalysisSaveService {
           paperId: paper.id,
           relationshipGraph,
         });
+        console.log(`  Creating new Analysis for paper ${paper.id} with ${relationshipGraph.edges.length} edges`);
       }
 
       updatedAnalyses.push(analysis);
     }
 
     const savedAnalyses = await analysisRepository.save(updatedAnalyses);
+    console.log(`✅ Saved ${savedAnalyses.length} Analysis records`);
 
     // Update PaperRelation records
     // First, delete existing relations for papers in this session
