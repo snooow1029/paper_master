@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useRef } from 'react';
+import React, { useState, useEffect, useRef, useCallback } from 'react';
 import GraphVisualization from '../components/GraphVisualization';
 import AnalysisProgress from '../components/AnalysisProgress';
 import { GraphData } from '../types/graph';
@@ -464,18 +464,22 @@ const PaperGraphPage: React.FC<PaperGraphPageProps> = ({ setSessionHandler }) =>
   };
 
   // Handle session selection from HistorySidebar
-  const handleSessionSelect = (sessionId: string, graphData: any) => {
+  const handleSessionSelect = useCallback((sessionId: string, graphData: any) => {
+    console.log('📥 Received session selection:', sessionId, graphData);
     setCurrentSessionId(sessionId);
     setGraphData(graphData);
+    // Switch to graph view mode
+    setViewMode('graph');
     console.log('✅ Loaded session:', sessionId);
-  };
+  }, []);
 
   // Register session handler with parent component
   useEffect(() => {
     if (setSessionHandler) {
+      console.log('📤 Registering session handler');
       setSessionHandler(handleSessionSelect);
     }
-  }, [setSessionHandler]);
+  }, [setSessionHandler, handleSessionSelect]);
 
   // Handle graph data updates from GraphVisualization
   const handleGraphDataUpdate = (updatedData: GraphData) => {

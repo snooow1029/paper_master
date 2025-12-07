@@ -14,11 +14,13 @@ const MainLayout: React.FC<MainLayoutProps> = ({ children, onSelectSession }) =>
   const [, setUser] = useState<any>(null);
 
   const handleSelectSession = (sessionId: string, graphData: any) => {
+    console.log('📋 MainLayout: Session selected', sessionId, graphData);
     setSidebarOpen(false);
     if (onSelectSession) {
+      console.log('📋 MainLayout: Calling onSelectSession');
       onSelectSession(sessionId, graphData);
     } else {
-      console.log('Selected session:', sessionId, graphData);
+      console.warn('⚠️ MainLayout: onSelectSession not provided');
     }
   };
 

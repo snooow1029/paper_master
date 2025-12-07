@@ -39,6 +39,10 @@ function TestPage() {
 function App() {
   const [sessionHandler, setSessionHandler] = React.useState<((sessionId: string, graphData: any) => void) | undefined>();
 
+  React.useEffect(() => {
+    console.log('🔧 App: sessionHandler updated', !!sessionHandler);
+  }, [sessionHandler]);
+
   return (
     <ThemeProvider theme={theme}>
       <CssBaseline />
