@@ -41,8 +41,34 @@ router.get(
 
 router.get(
   '/google/callback',
-  passport.authenticate('google', { session: false, failureRedirect: '/login' }),
-  authController.googleCallback.bind(authController)
+  (req: Request, res: Response, next: any) => {
+    console.log('🔐 OAuth callback received');
+    console.log('🔐 Query params:', req.query);
+    console.log('🔐 Callback URL from request:', req.url);
+    
+    passport.authenticate('google', { session: false }, (err: any, user: any, info: any) => {
+      console.log('🔐 Passport authenticate result:');
+      console.log('  - Error:', err);
+      console.log('  - User:', user ? { id: user.id, email: user.email } : null);
+      console.log('  - Info:', info);
+      
+      if (err) {
+        console.error('❌ OAuth authentication error:', err);
+        const frontendUrl = process.env.FRONTEND_URL || 'https://paper-master.vercel.app';
+        return res.redirect(`${frontendUrl}/?error=oauth_error&message=${encodeURIComponent(err.message || 'Authentication failed')}`);
+      }
+      
+      if (!user) {
+        console.error('❌ OAuth authentication failed: No user');
+        const frontendUrl = process.env.FRONTEND_URL || 'https://paper-master.vercel.app';
+        return res.redirect(`${frontendUrl}/?error=oauth_error&message=Authentication failed`);
+      }
+      
+      // Attach user to request and continue to callback handler
+      (req as any).user = user;
+      authController.googleCallback(req, res);
+    })(req, res, next);
+  }
 );
 
 // Get current user (requires JWT token)
