@@ -79,15 +79,26 @@ export class AnalysisSaveService {
   }
 
   /**
-   * Generate session title from first paper
+   * Generate session title from source paper (original paper)
    */
-  private generateSessionTitle(papers: PaperData[]): string {
+  private generateSessionTitle(papers: PaperData[], originalPaperIds?: string[]): string {
+    // If originalPaperIds is provided, use the first original paper's title
+    if (originalPaperIds && originalPaperIds.length > 0) {
+      const firstOriginalId = originalPaperIds[0];
+      const firstOriginalPaper = papers.find(p => p.id === firstOriginalId);
+      if (firstOriginalPaper && firstOriginalPaper.title) {
+        const title = firstOriginalPaper.title;
+        return title.length > 60 ? title.substring(0, 60) + '...' : title;
+      }
+    }
+    
+    // Fallback: use first paper title
     if (papers.length > 0 && papers[0].title) {
-      // Use first paper title, truncate if too long
       const title = papers[0].title;
       return title.length > 60 ? title.substring(0, 60) + '...' : title;
     }
-    return `Analysis of ${papers.length} papers - ${new Date().toLocaleDateString()}`;
+    
+    return `Analysis of ${papers.length} papers`;
   }
 
   /**
@@ -162,8 +173,13 @@ export class AnalysisSaveService {
       };
     }));
     
-    // Use provided title or generate from first paper
-    const finalTitle = sessionTitle || this.generateSessionTitle(papers);
+    // Get originalPapers from graphData if available
+    const originalPaperIds = (graphData as any).originalPapers;
+    console.log(`📥 Original papers: ${originalPaperIds ? originalPaperIds.length : 0} papers`);
+    
+    // Use provided title or generate from source paper (original paper)
+    const finalTitle = sessionTitle || this.generateSessionTitle(papers, originalPaperIds);
+    console.log(`📝 Generated session title: "${finalTitle}"`);
     const sessionRepository = AppDataSource.getRepository(Session);
     const analysisRepository = AppDataSource.getRepository(Analysis);
     const paperRelationRepository = AppDataSource.getRepository(PaperRelation);
@@ -732,8 +748,9 @@ export class AnalysisSaveService {
     await this.buildKnowledgeGraph(normalizedData, existingPapers, paperIdMap);
     console.log(`✅ Updated knowledge graph`);
 
-    // Update session timestamp
-    session.updatedAt = new Date();
+    // Note: Don't update updatedAt here - we want to preserve the original createdAt
+    // updatedAt will be automatically updated by TypeORM's @UpdateDateColumn
+    // But we explicitly don't want to change it manually to preserve the original analysis time
     await sessionRepository.save(session);
 
     return {

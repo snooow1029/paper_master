@@ -27,7 +27,7 @@ export class SessionService {
     return await sessionRepository.find({
       where: { userId },
       relations: ['analyses', 'analyses.paper'],
-      order: { updatedAt: 'DESC' },
+      order: { updatedAt: 'DESC' }, // Sort by last update time (most recently edited first)
     });
   }
 
