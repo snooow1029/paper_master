@@ -10,12 +10,27 @@ const googleClientId = process.env.GOOGLE_CLIENT_ID;
 const googleClientSecret = process.env.GOOGLE_CLIENT_SECRET;
 
 if (googleClientId && googleClientSecret) {
+  // IMPORTANT: Callback URL must match exactly between:
+  // 1. The redirect_uri in the authorization URL (authRoutes.ts)
+  // 2. The callbackURL in passport Strategy (this file)
+  // 3. The authorized redirect URIs in Google Cloud Console
+  //
+  // In production, GOOGLE_CALLBACK_URL should be set to full URL like:
+  // https://papermaster-production-c4fe.up.railway.app/api/auth/google/callback
+  //
+  // If not set, passport-google-oauth20 will use relative path '/api/auth/google/callback'
+  // which will be resolved relative to the request host
+  const callbackURL = process.env.GOOGLE_CALLBACK_URL || '/api/auth/google/callback';
+  
+  console.log(`🔐 Google OAuth Strategy callback URL: ${callbackURL}`);
+  console.log(`⚠️  Make sure this matches the redirect_uri in authorization URL and Google Cloud Console`);
+  
   passport.use(
     new GoogleStrategy(
       {
         clientID: googleClientId,
         clientSecret: googleClientSecret,
-        callbackURL: process.env.GOOGLE_CALLBACK_URL || '/api/auth/google/callback',
+        callbackURL: callbackURL,
       },
       async (accessToken: string, refreshToken: string, profile: Profile, done: VerifyCallback) => {
         try {

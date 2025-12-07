@@ -12,7 +12,16 @@ router.get(
   (req: Request, res: Response, next: any) => {
     // Manually build Google OAuth authorization URL with prompt=select_account
     const googleClientId = process.env.GOOGLE_CLIENT_ID;
-    const callbackURL = process.env.GOOGLE_CALLBACK_URL || `${req.protocol}://${req.get('host')}/api/auth/google/callback`;
+    
+    // Use the same callback URL logic as passport.ts
+    // If GOOGLE_CALLBACK_URL is set, use it; otherwise construct from request
+    let callbackURL = process.env.GOOGLE_CALLBACK_URL;
+    if (!callbackURL) {
+      // Construct full URL from request
+      callbackURL = `${req.protocol}://${req.get('host')}/api/auth/google/callback`;
+    }
+    
+    console.log(`🔐 OAuth authorization redirect_uri: ${callbackURL}`);
     
     if (!googleClientId) {
       return res.status(500).json({ error: 'Google OAuth not configured' });
