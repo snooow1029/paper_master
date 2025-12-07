@@ -35,7 +35,16 @@ export class AuthController {
 
       // Redirect to frontend with token
       const frontendUrl = process.env.FRONTEND_URL || 'http://localhost:3000';
-      const redirectUrl = `${frontendUrl}/login/success?token=${encodeURIComponent(token)}`;
+      
+      // Option 1: Redirect to home page with token in query (simplest, works immediately)
+      // Token will be in URL, frontend should extract and store it
+      const redirectUrl = `${frontendUrl}/?token=${encodeURIComponent(token)}`;
+      
+      // Option 2: Redirect to home page with token in hash (more secure, doesn't appear in server logs)
+      // const redirectUrl = `${frontendUrl}/#/login-success?token=${encodeURIComponent(token)}`;
+      
+      // Option 3: Redirect to a specific success page (requires frontend route)
+      // const redirectUrl = `${frontendUrl}/login/success?token=${encodeURIComponent(token)}`;
       
       res.redirect(redirectUrl);
     } catch (error) {
