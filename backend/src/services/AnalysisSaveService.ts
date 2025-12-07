@@ -91,6 +91,53 @@ export class AnalysisSaveService {
   }
 
   /**
+   * Normalize graphData to ensure consistent format (from/to instead of source/target)
+   * This ensures edges are always in the correct format for storage and retrieval
+   */
+  private normalizeGraphData(graphData: GraphData): GraphData {
+    const normalizedNodes = (graphData.nodes || []).map(node => ({
+      ...node,
+      id: String(node.id || node.url || `node-${Math.random()}`),
+      label: String(node.label || node.title || ''),
+    }));
+
+    const normalizedEdges = (graphData.edges || []).map((edge, index) => {
+      // Support both 'from/to' and 'source/target' formats
+      const fromId = edge.from || (typeof edge.source === 'string' ? edge.source : (edge.source as any)?.id);
+      const toId = edge.to || (typeof edge.target === 'string' ? edge.target : (edge.target as any)?.id);
+      
+      const fromIdStr = typeof fromId === 'string' 
+        ? fromId 
+        : (fromId?.id ? String(fromId.id) : String(fromId));
+      const toIdStr = typeof toId === 'string' 
+        ? toId 
+        : (toId?.id ? String(toId.id) : String(toId));
+
+      return {
+        ...edge,
+        id: String(edge.id || `edge-${fromIdStr}-${toIdStr}-${index}`),
+        from: fromIdStr,
+        to: toIdStr,
+        label: edge.label || edge.relationship || '',
+      };
+    });
+
+    console.log(`🔄 Normalized graphData: ${normalizedNodes.length} nodes, ${normalizedEdges.length} edges`);
+
+    const result: GraphData = {
+      nodes: normalizedNodes,
+      edges: normalizedEdges,
+    };
+    
+    // Add originalPapers if it exists (it's not part of GraphData interface but may be present)
+    if ((graphData as any).originalPapers) {
+      (result as any).originalPapers = (graphData as any).originalPapers.map((id: any) => String(id));
+    }
+    
+    return result;
+  }
+
+  /**
    * Save analysis result to database
    * Creates Session, saves Papers, creates Analysis records, and saves relationships
    */
@@ -107,14 +154,16 @@ export class AnalysisSaveService {
     const paperRelationRepository = AppDataSource.getRepository(PaperRelation);
 
     // 1. Create Session with graphSnapshot (Snapshot Layer)
+    // Normalize graphData to ensure edges use 'from/to' format before saving
+    const normalizedGraphData = this.normalizeGraphData(graphData);
     const session = sessionRepository.create({
       userId,
       title: finalTitle,
       description: `Analysis of ${papers.length} papers`,
-      graphSnapshot: JSON.stringify(graphData), // Save raw graphData for instant UI restoration
+      graphSnapshot: JSON.stringify(normalizedGraphData), // Save normalized graphData for instant UI restoration
     });
     const savedSession = await sessionRepository.save(session);
-    console.log(`💾 Saved graphSnapshot to Session ${savedSession.id}`);
+    console.log(`💾 Saved graphSnapshot to Session ${savedSession.id} with ${normalizedGraphData.nodes.length} nodes and ${normalizedGraphData.edges.length} edges`);
 
     // 2. Upsert all papers
     const savedPapers: Paper[] = [];
