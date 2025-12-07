@@ -16,9 +16,6 @@ if (googleClientId && googleClientSecret) {
         clientID: googleClientId,
         clientSecret: googleClientSecret,
         callbackURL: process.env.GOOGLE_CALLBACK_URL || '/api/auth/google/callback',
-        authorizationParams: {
-          prompt: 'select_account', // Force account selection screen every time
-        },
       },
       async (accessToken: string, refreshToken: string, profile: Profile, done: VerifyCallback) => {
         try {
