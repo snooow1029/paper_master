@@ -44,8 +44,9 @@ const GraphVisualization: React.FC<GraphVisualizationProps> = ({
   // Helper function to check if a node has edges
   const hasEdges = React.useCallback((nodeId: string): boolean => {
     return data.edges.some(edge => {
-      const sourceId = edge.from || (typeof edge.source === 'string' ? edge.source : (edge.source as Node)?.id);
-      const targetId = edge.to || (typeof edge.target === 'string' ? edge.target : (edge.target as Node)?.id);
+      const edgeAny = edge as any;
+      const sourceId = edgeAny.from || (typeof edge.source === 'string' ? edge.source : (edge.source as Node)?.id);
+      const targetId = edgeAny.to || (typeof edge.target === 'string' ? edge.target : (edge.target as Node)?.id);
       return sourceId === nodeId || targetId === nodeId;
     });
   }, [data.edges]);
@@ -58,8 +59,9 @@ const GraphVisualization: React.FC<GraphVisualizationProps> = ({
       ...data,
       nodes: data.nodes.filter(node => !selectedNodeIds.has(node.id)),
       edges: data.edges.filter(edge => {
-        const sourceId = edge.from || (typeof edge.source === 'string' ? edge.source : (edge.source as Node)?.id);
-        const targetId = edge.to || (typeof edge.target === 'string' ? edge.target : (edge.target as Node)?.id);
+        const edgeAny = edge as any;
+        const sourceId = edgeAny.from || (typeof edge.source === 'string' ? edge.source : (edge.source as Node)?.id);
+        const targetId = edgeAny.to || (typeof edge.target === 'string' ? edge.target : (edge.target as Node)?.id);
         return !selectedNodeIds.has(sourceId) && !selectedNodeIds.has(targetId);
       })
     };
@@ -208,8 +210,9 @@ const GraphVisualization: React.FC<GraphVisualizationProps> = ({
     
     // Find connected edges BEFORE edit
     const connectedEdgesBefore = data.edges.filter(e => {
-      const sourceId = e.from || (typeof e.source === 'string' ? e.source : e.source?.id);
-      const targetId = e.to || (typeof e.target === 'string' ? e.target : e.target?.id);
+      const eAny = e as any;
+      const sourceId = eAny.from || (typeof e.source === 'string' ? e.source : e.source?.id);
+      const targetId = eAny.to || (typeof e.target === 'string' ? e.target : e.target?.id);
       return sourceId === editNodeData.id || targetId === editNodeData.id;
     });
     console.log('🔗 Connected edges BEFORE edit:', connectedEdgesBefore);
@@ -221,8 +224,9 @@ const GraphVisualization: React.FC<GraphVisualizationProps> = ({
     
     // 🔧 FIX: Update edges to reference the new node objects
     const newEdges = data.edges.map(edge => {
-      const sourceId = edge.from || (typeof edge.source === 'string' ? edge.source : edge.source?.id);
-      const targetId = edge.to || (typeof edge.target === 'string' ? edge.target : edge.target?.id);
+      const edgeAny = edge as any;
+      const sourceId = edgeAny.from || (typeof edge.source === 'string' ? edge.source : edge.source?.id);
+      const targetId = edgeAny.to || (typeof edge.target === 'string' ? edge.target : edge.target?.id);
       
       // Find the corresponding new node objects
       const newSourceNode = newNodes.find(n => n.id === sourceId);
@@ -243,8 +247,9 @@ const GraphVisualization: React.FC<GraphVisualizationProps> = ({
     
     // Find connected edges AFTER edit
     const connectedEdgesAfter = newData.edges.filter(e => {
-      const sourceId = e.from || (typeof e.source === 'string' ? e.source : e.source?.id);
-      const targetId = e.to || (typeof e.target === 'string' ? e.target : e.target?.id);
+      const eAny = e as any;
+      const sourceId = eAny.from || (typeof e.source === 'string' ? e.source : e.source?.id);
+      const targetId = eAny.to || (typeof e.target === 'string' ? e.target : e.target?.id);
       return sourceId === editNodeData.id || targetId === editNodeData.id;
     });
     console.log('✅ Updated node after edit:', newData.nodes.find(n => n.id === editNodeData.id));
@@ -271,8 +276,9 @@ const GraphVisualization: React.FC<GraphVisualizationProps> = ({
     const newData = {
       ...data,
       edges: data.edges.map(edge => {
-        const sourceId = edge.from || (typeof edge.source === 'string' ? edge.source : (edge.source as Node)?.id);
-        const targetId = edge.to || (typeof edge.target === 'string' ? edge.target : (edge.target as Node)?.id);
+        const edgeAny = edge as any;
+        const sourceId = edgeAny.from || (typeof edge.source === 'string' ? edge.source : (edge.source as Node)?.id);
+        const targetId = edgeAny.to || (typeof edge.target === 'string' ? edge.target : (edge.target as Node)?.id);
         if (sourceId === editEdgeData.source && targetId === editEdgeData.target) {
             return { ...edge, ...editEdgeData };
         }
@@ -359,8 +365,9 @@ const GraphVisualization: React.FC<GraphVisualizationProps> = ({
       : data.nodes.filter(node => {
           // Check if node has at least one edge
           return data.edges.some(edge => {
-            const sourceId = edge.from || (typeof edge.source === 'string' ? edge.source : (edge.source as Node)?.id);
-            const targetId = edge.to || (typeof edge.target === 'string' ? edge.target : (edge.target as Node)?.id);
+            const edgeAny = edge as any;
+            const sourceId = edgeAny.from || (typeof edge.source === 'string' ? edge.source : (edge.source as Node)?.id);
+            const targetId = edgeAny.to || (typeof edge.target === 'string' ? edge.target : (edge.target as Node)?.id);
             return sourceId === node.id || targetId === node.id;
           });
         });
@@ -370,8 +377,10 @@ const GraphVisualization: React.FC<GraphVisualizationProps> = ({
     const filteredEdges = data.edges
       .map(edge => {
         // Support both 'from/to' and 'source/target' formats
-        const sourceId = edge.from || (typeof edge.source === 'string' ? edge.source : (edge.source as Node)?.id);
-        const targetId = edge.to || (typeof edge.target === 'string' ? edge.target : (edge.target as Node)?.id);
+        // Use type assertion to access 'from' and 'to' which may exist in raw data
+        const edgeAny = edge as any;
+        const sourceId = edgeAny.from || (typeof edge.source === 'string' ? edge.source : (edge.source as Node)?.id);
+        const targetId = edgeAny.to || (typeof edge.target === 'string' ? edge.target : (edge.target as Node)?.id);
         // Ensure source and target are strings (node IDs)
         const sourceIdStr = typeof sourceId === 'string' ? sourceId : String(sourceId);
         const targetIdStr = typeof targetId === 'string' ? targetId : String(targetId);
@@ -568,19 +577,19 @@ const GraphVisualization: React.FC<GraphVisualizationProps> = ({
         
         nodesUpdate
           .attr('r', (nodeData: any) => {
-            const sourceId = (d.source as Node).id || d.source;
-            const targetId = (d.target as Node).id || d.target;
+            const sourceId = typeof d.source === 'string' ? d.source : (d.source as Node)?.id;
+            const targetId = typeof d.target === 'string' ? d.target : (d.target as Node)?.id;
             return (nodeData.id === sourceId || nodeData.id === targetId) ? 28 : 25;
           })
           .attr('fill', (nodeData: any) => isSourceNode(nodeData.id) ? 'url(#sourceNodeGradient)' : 'url(#nodeGradient)')
           .style('stroke', (nodeData: any) => {
-            const sourceId = (d.source as Node).id || d.source;
-            const targetId = (d.target as Node).id || d.target;
+            const sourceId = typeof d.source === 'string' ? d.source : (d.source as Node)?.id;
+            const targetId = typeof d.target === 'string' ? d.target : (d.target as Node)?.id;
             return (nodeData.id === sourceId || nodeData.id === targetId) ? '#64c864' : 'rgba(100, 200, 100, 0.4)';
           })
           .style('stroke-width', (nodeData: any) => {
-            const sourceId = (d.source as Node).id || d.source;
-            const targetId = (d.target as Node).id || d.target;
+            const sourceId = typeof d.source === 'string' ? d.source : (d.source as Node)?.id;
+            const targetId = typeof d.target === 'string' ? d.target : (d.target as Node)?.id;
             return (nodeData.id === sourceId || nodeData.id === targetId) ? 4 : 2;
           });
       })
