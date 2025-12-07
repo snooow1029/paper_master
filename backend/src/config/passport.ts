@@ -1,6 +1,7 @@
 import passport from 'passport';
-import { Strategy as GoogleStrategy } from 'passport-google-oauth20';
+import { Strategy as GoogleStrategy, VerifyCallback } from 'passport-google-oauth20';
 import { AuthService } from '../services/AuthService';
+import { Profile } from 'passport-google-oauth20';
 
 const authService = new AuthService();
 
@@ -16,7 +17,7 @@ if (googleClientId && googleClientSecret) {
         clientSecret: googleClientSecret,
         callbackURL: process.env.GOOGLE_CALLBACK_URL || '/api/auth/google/callback',
       },
-      async (accessToken, refreshToken, profile, done) => {
+      async (accessToken: string, refreshToken: string, profile: Profile, done: VerifyCallback) => {
         try {
           const user = await authService.findOrCreateUser({
             id: profile.id,
@@ -26,7 +27,7 @@ if (googleClientId && googleClientSecret) {
           });
           return done(null, user);
         } catch (error) {
-          return done(error, null);
+          return done(error as Error, undefined);
         }
       }
     )
@@ -37,17 +38,17 @@ if (googleClientId && googleClientSecret) {
 }
 
 // Serialize user for session
-passport.serializeUser((user: any, done) => {
+passport.serializeUser((user: any, done: (err: any, id?: string) => void) => {
   done(null, user.id);
 });
 
 // Deserialize user from session
-passport.deserializeUser(async (id: string, done) => {
+passport.deserializeUser(async (id: string, done: (err: any, user?: any) => void) => {
   try {
     const user = await authService.getUserById(id);
-    done(null, user);
+    done(null, user || undefined);
   } catch (error) {
-    done(error, null);
+    done(error as Error, undefined);
   }
 });
 

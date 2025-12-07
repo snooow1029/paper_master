@@ -12,7 +12,7 @@ export class SessionService {
     const session = sessionRepository.create({
       userId,
       title: title || 'New Session',
-      description: description || null,
+      description: description || undefined,
     });
     
     return await sessionRepository.save(session);

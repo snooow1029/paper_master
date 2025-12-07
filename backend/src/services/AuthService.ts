@@ -23,8 +23,8 @@ export class AuthService {
       user = userRepository.create({
         googleId: profile.id,
         email: profile.email,
-        name: profile.name || null,
-        avatar: profile.picture || null,
+        name: profile.name || undefined,
+        avatar: profile.picture || undefined,
       });
       await userRepository.save(user);
     } else {

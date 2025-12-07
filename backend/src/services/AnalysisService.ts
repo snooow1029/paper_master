@@ -38,8 +38,8 @@ export class AnalysisService {
       analysis = analysisRepository.create({
         sessionId,
         paperId,
-        notes: data.notes || null,
-        relationshipGraph: data.relationshipGraph || null,
+        notes: data.notes || undefined,
+        relationshipGraph: data.relationshipGraph || undefined,
       });
     }
 
