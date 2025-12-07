@@ -197,7 +197,7 @@ export default function HistorySidebar({ open, onClose, onSelectSession }: Histo
                     }
                     secondary={
                       <Typography variant="body2" sx={{ color: '#b8b8b8', fontSize: '0.8rem' }}>
-                        {formatDate(session.createdAt)}
+                        {formatDate(session.updatedAt)}
                       </Typography>
                     }
                   />

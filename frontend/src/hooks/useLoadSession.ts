@@ -50,15 +50,45 @@ export function useLoadSession(sessionId: string | null): UseLoadSessionResult {
         const data = await response.json();
         const rawGraphData = data.graphData;
 
+        console.log(`\n🟡 ========== FRONTEND LOAD SESSION START ==========`);
+        console.log(`📥 Session ID: ${sessionId}`);
+        console.log(`📥 Raw response data:`, {
+          hasGraphData: !!rawGraphData,
+          nodesCount: rawGraphData?.nodes?.length || 0,
+          edgesCount: rawGraphData?.edges?.length || 0
+        });
+
         if (!rawGraphData) {
           throw new Error('No graph data found in session');
         }
 
+        if (rawGraphData.edges && rawGraphData.edges.length > 0) {
+          console.log(`📥 Raw edges sample (first 3):`, rawGraphData.edges.slice(0, 3).map((e: any) => ({
+            id: e.id,
+            from: e.from,
+            to: e.to,
+            source: e.source,
+            target: e.target,
+            label: e.label
+          })));
+        }
+
         // Sanitize graph data: ensure all IDs are strings
         const sanitizedGraphData = sanitizeGraphData(rawGraphData);
+        
+        console.log(`🔄 After sanitization: ${sanitizedGraphData.nodes.length} nodes, ${sanitizedGraphData.edges.length} edges`);
+        if (sanitizedGraphData.edges.length > 0) {
+          console.log(`🔄 Sanitized edges sample (first 3):`, sanitizedGraphData.edges.slice(0, 3).map((e: any) => ({
+            id: e.id,
+            source: e.source,
+            target: e.target,
+            label: e.label
+          })));
+        }
 
         setGraphData(sanitizedGraphData);
         console.log(`✅ Loaded session ${sessionId}: ${sanitizedGraphData.nodes.length} nodes, ${sanitizedGraphData.edges.length} edges`);
+        console.log(`🟡 ========== FRONTEND LOAD SESSION END ==========\n`);
       } catch (err) {
         const errorMessage = err instanceof Error ? err.message : 'Unknown error occurred';
         console.error('❌ Failed to load session:', errorMessage);
@@ -80,12 +110,15 @@ export function useLoadSession(sessionId: string | null): UseLoadSessionResult {
  * This prevents ID mismatch issues in vis-network
  */
 function sanitizeGraphData(graphData: any): GraphData {
-  // Sanitize nodes: ensure id is a string
+  // Sanitize nodes: ensure id is a string and arrays are initialized
   const sanitizedNodes = (graphData.nodes || []).map((node: any) => ({
     ...node,
     id: String(node.id || node.url || `node-${Math.random()}`),
     // Ensure label is a string
     label: String(node.label || node.title || ''),
+    // Ensure arrays are initialized (not undefined)
+    authors: Array.isArray(node.authors) ? node.authors : [],
+    tags: Array.isArray(node.tags) ? node.tags : [],
   }));
 
   // Sanitize edges: convert from/to to source/target format for D3 compatibility

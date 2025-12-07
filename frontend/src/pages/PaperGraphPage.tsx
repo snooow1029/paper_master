@@ -416,7 +416,34 @@ const PaperGraphPage: React.FC<PaperGraphPageProps> = ({ setSessionHandler }) =>
         return;
       }
 
+      // Extract original paper IDs from result.originalPapers
+      // originalPapers can be either an array of IDs or an object with priorWorks/derivativeWorks
+      let originalPaperIds: string[] = [];
+      if (result.originalPapers) {
+        if (Array.isArray(result.originalPapers)) {
+          originalPaperIds = result.originalPapers;
+        } else if (result.originalPapers.priorWorks || result.originalPapers.derivativeWorks) {
+          // Extract IDs from priorWorks and derivativeWorks objects
+          const priorWorkIds = Object.keys(result.originalPapers.priorWorks || {});
+          const derivativeWorkIds = Object.keys(result.originalPapers.derivativeWorks || {});
+          originalPaperIds = [...priorWorkIds, ...derivativeWorkIds];
+        } else {
+          // Try to find original papers from graphData nodes (first node is usually the source)
+          originalPaperIds = graphData.nodes && graphData.nodes.length > 0 ? [graphData.nodes[0].id] : [];
+        }
+      } else if (graphData.nodes && graphData.nodes.length > 0) {
+        // Fallback: use first node as original paper
+        originalPaperIds = [graphData.nodes[0].id];
+      }
+
+      // Add originalPapers to graphData so backend can use it for title generation
+      const graphDataWithOriginalPapers = {
+        ...graphData,
+        originalPapers: originalPaperIds,
+      };
+
       // Use save-result endpoint to save without re-analyzing
+      // Don't pass title, let backend generate it from source paper
       const saveResponse = await fetch(`${API_BASE_URL}/api/analyses/save-result`, {
         method: 'POST',
         headers: {
@@ -425,8 +452,8 @@ const PaperGraphPage: React.FC<PaperGraphPageProps> = ({ setSessionHandler }) =>
         },
         body: JSON.stringify({
           urls: paperUrls,
-          title: `Analysis - ${new Date().toLocaleDateString()}`,
-          graphData: graphData,
+          // title: undefined, // Let backend generate from source paper title
+          graphData: graphDataWithOriginalPapers,
           papers: papers.length > 0 ? papers : undefined,
         }),
       });
@@ -459,7 +486,20 @@ const PaperGraphPage: React.FC<PaperGraphPageProps> = ({ setSessionHandler }) =>
         return;
       }
 
+      console.log(`\n🔴 ========== UPDATE SESSION GRAPH START ==========`);
       console.log(`💾 Updating session ${currentSessionId} with ${data.nodes?.length || 0} nodes and ${data.edges?.length || 0} edges`);
+      if (data.edges && data.edges.length > 0) {
+        console.log(`💾 Edges sample (first 3):`, data.edges.slice(0, 3).map((e: any) => ({
+          id: e.id,
+          source: e.source,
+          target: e.target,
+          from: e.from,
+          to: e.to,
+          label: e.label
+        })));
+      } else {
+        console.log(`⚠️ WARNING: No edges to save!`);
+      }
 
       const updateResponse = await fetch(`${API_BASE_URL}/api/sessions/${currentSessionId}/update-graph`, {
         method: 'PUT',
@@ -475,9 +515,11 @@ const PaperGraphPage: React.FC<PaperGraphPageProps> = ({ setSessionHandler }) =>
       if (updateResponse.ok) {
         const result = await updateResponse.json();
         console.log('✅ Session graph updated:', result);
+        console.log(`🔴 ========== UPDATE SESSION GRAPH END ==========\n`);
       } else {
         const errorText = await updateResponse.text();
         console.warn('Failed to update session:', errorText);
+        console.log(`🔴 ========== UPDATE SESSION GRAPH FAILED ==========\n`);
       }
     } catch (error) {
       console.error('Error updating session:', error);
@@ -490,7 +532,20 @@ const PaperGraphPage: React.FC<PaperGraphPageProps> = ({ setSessionHandler }) =>
   // Update graphData when session is loaded via hook
   useEffect(() => {
     if (loadedGraphData && currentSessionId) {
-      console.log('📥 PaperGraphPage: Session loaded via hook:', currentSessionId, 'with', loadedGraphData.nodes.length, 'nodes and', loadedGraphData.edges.length, 'edges');
+      console.log(`\n🟣 ========== PAPERGRAPHPAGE RECEIVE DATA ==========`);
+      console.log(`📥 Session ID: ${currentSessionId}`);
+      console.log(`📥 Received graphData: ${loadedGraphData.nodes.length} nodes, ${loadedGraphData.edges.length} edges`);
+      if (loadedGraphData.edges.length > 0) {
+        console.log(`📥 Edges sample (first 3):`, loadedGraphData.edges.slice(0, 3).map((e: any) => ({
+          id: e.id,
+          source: e.source,
+          target: e.target,
+          label: e.label
+        })));
+      } else {
+        console.log(`⚠️ WARNING: No edges in loaded graphData!`);
+      }
+      console.log(`🟣 ========== PAPERGRAPHPAGE RECEIVE DATA END ==========\n`);
       setGraphData(loadedGraphData);
       setViewMode('graph');
     }
