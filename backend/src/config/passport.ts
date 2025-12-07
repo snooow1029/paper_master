@@ -37,20 +37,8 @@ if (googleClientId && googleClientSecret) {
   console.log('⚠️  Google OAuth not configured - set GOOGLE_CLIENT_ID and GOOGLE_CLIENT_SECRET to enable');
 }
 
-// Serialize user for session
-passport.serializeUser((user: any, done: (err: any, id?: string) => void) => {
-  done(null, user.id);
-});
-
-// Deserialize user from session
-passport.deserializeUser(async (id: string, done: (err: any, user?: any) => void) => {
-  try {
-    const user = await authService.getUserById(id);
-    done(null, user || undefined);
-  } catch (error) {
-    done(error as Error, undefined);
-  }
-});
+// Note: We're using JWT tokens instead of sessions
+// No need for serializeUser/deserializeUser
 
 export default passport;
 

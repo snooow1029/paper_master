@@ -1,6 +1,7 @@
 import { Request, Response } from 'express';
 import { AuthService } from '../services/AuthService';
 import { SessionService } from '../services/SessionService';
+import { generateToken } from '../utils/jwt';
 
 export class AuthController {
   private authService: AuthService;
@@ -13,50 +14,47 @@ export class AuthController {
 
   /**
    * Google OAuth callback handler
+   * Generates JWT token and redirects to frontend with token
    */
   async googleCallback(req: Request, res: Response) {
     try {
-      // This will be handled by passport middleware
-      // The user will be attached to req.user by passport
+      // User is attached to req.user by passport middleware
       const user = (req as any).user;
       
       if (!user) {
-        return res.status(401).json({ error: 'Authentication failed' });
+        // Redirect to frontend with error
+        const frontendUrl = process.env.FRONTEND_URL || 'http://localhost:3000';
+        return res.redirect(`${frontendUrl}/login?error=authentication_failed`);
       }
 
-      // Redirect to frontend with token or user info
-      // For now, we'll return user info
-      // In production, you should generate a JWT token here
-      res.json({
-        success: true,
-        user: {
-          id: user.id,
-          email: user.email,
-          name: user.name,
-          avatar: user.avatar,
-        },
+      // Generate JWT token
+      const token = generateToken({
+        userId: user.id,
+        email: user.email,
       });
+
+      // Redirect to frontend with token
+      const frontendUrl = process.env.FRONTEND_URL || 'http://localhost:3000';
+      const redirectUrl = `${frontendUrl}/login/success?token=${encodeURIComponent(token)}`;
+      
+      res.redirect(redirectUrl);
     } catch (error) {
       console.error('Error in Google OAuth callback:', error);
-      res.status(500).json({ error: 'Authentication failed' });
+      const frontendUrl = process.env.FRONTEND_URL || 'http://localhost:3000';
+      res.redirect(`${frontendUrl}/login?error=server_error`);
     }
   }
 
   /**
-   * Get current user info
+   * Get current user info (requires JWT authentication)
    */
   async getCurrentUser(req: Request, res: Response) {
     try {
-      const userId = (req as any).user?.id;
-      
-      if (!userId) {
-        return res.status(401).json({ error: 'Not authenticated' });
-      }
-
-      const user = await this.authService.getUserById(userId);
+      // User is attached by authenticateToken middleware
+      const user = (req as any).user;
       
       if (!user) {
-        return res.status(404).json({ error: 'User not found' });
+        return res.status(401).json({ error: 'Not authenticated' });
       }
 
       res.json({

@@ -14,7 +14,6 @@ import { logStartupInfo, debugEnvironment } from './debug';
 
 import express from 'express';
 import cors from 'cors';
-import session from 'express-session';
 import { AppDataSource } from './config/database';
 import passport from './config/passport';
 import paperRoutes from './routes/paperRoutes';
@@ -60,25 +59,8 @@ app.use(cors({
 app.use(express.json({ limit: '50mb' }));
 app.use(express.urlencoded({ limit: '50mb', extended: true }));
 
-// Session configuration for OAuth
-app.use(
-  session({
-    secret: process.env.SESSION_SECRET || 'your-secret-key-change-in-production',
-    resave: false,
-    saveUninitialized: false,
-    cookie: {
-      secure: process.env.NODE_ENV === 'production', // HTTPS only in production
-      httpOnly: true,
-      maxAge: 24 * 60 * 60 * 1000, // 24 hours
-      sameSite: process.env.NODE_ENV === 'production' ? 'none' : 'lax', // Allow cross-site cookies in production
-    },
-    name: 'paper_master_session', // Custom session name
-  })
-);
-
-// Initialize Passport
+// Initialize Passport (for OAuth flow only, no session needed)
 app.use(passport.initialize());
-app.use(passport.session());
 
 // Routes
 app.use('/api/papers', paperRoutes);
