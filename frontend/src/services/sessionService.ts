@@ -2,7 +2,7 @@
  * Session API 服务
  */
 
-import { getAuthHeaders, getAuthToken } from '../utils/auth';
+import { getAuthToken } from '../utils/auth';
 
 const API_BASE_URL = import.meta.env.VITE_API_BASE_URL || '';
 
