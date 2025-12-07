@@ -46,16 +46,44 @@ router.get(
     console.log('🔐 Query params:', req.query);
     console.log('🔐 Callback URL from request:', req.url);
     
+    // IMPORTANT: The callbackURL used here must match exactly with:
+    // 1. The redirect_uri in the authorization URL (from /google route)
+    // 2. The callbackURL in passport Strategy configuration
+    // 3. The authorized redirect URIs in Google Cloud Console
+    
+    // If GOOGLE_CALLBACK_URL is not set, we need to ensure passport uses the same
+    // full URL that was used in the authorization request
+    // Since we can't modify passport strategy at runtime, we must ensure
+    // GOOGLE_CALLBACK_URL environment variable is set in production
+    
+    const expectedCallbackURL = process.env.GOOGLE_CALLBACK_URL || `${req.protocol}://${req.get('host')}/api/auth/google/callback`;
+    console.log(`🔐 Expected callback URL: ${expectedCallbackURL}`);
+    console.log(`🔐 Strategy callback URL: ${process.env.GOOGLE_CALLBACK_URL || '/api/auth/google/callback'}`);
+    
+    if (!process.env.GOOGLE_CALLBACK_URL) {
+      console.warn('⚠️  WARNING: GOOGLE_CALLBACK_URL not set!');
+      console.warn('⚠️  This may cause invalid_grant errors if Strategy uses relative path');
+      console.warn('⚠️  Please set GOOGLE_CALLBACK_URL environment variable in Railway');
+    }
+    
     passport.authenticate('google', { session: false }, (err: any, user: any, info: any) => {
       console.log('🔐 Passport authenticate result:');
       console.log('  - Error:', err);
+      if (err) {
+        console.error('❌ OAuth authentication error details:', {
+          code: err.code,
+          message: err.message,
+          status: err.status,
+          name: err.name,
+        });
+      }
       console.log('  - User:', user ? { id: user.id, email: user.email } : null);
       console.log('  - Info:', info);
       
       if (err) {
         console.error('❌ OAuth authentication error:', err);
         const frontendUrl = process.env.FRONTEND_URL || 'https://paper-master.vercel.app';
-        return res.redirect(`${frontendUrl}/?error=oauth_error&message=${encodeURIComponent(err.message || 'Authentication failed')}`);
+        return res.redirect(`${frontendUrl}/?error=oauth_error&message=${encodeURIComponent(err.message || 'Authentication failed')}&code=${err.code || 'unknown'}`);
       }
       
       if (!user) {

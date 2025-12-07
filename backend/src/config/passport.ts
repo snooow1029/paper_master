@@ -15,12 +15,28 @@ if (googleClientId && googleClientSecret) {
   // 2. The callbackURL in passport Strategy (this file)
   // 3. The authorized redirect URIs in Google Cloud Console
   //
-  // In production, GOOGLE_CALLBACK_URL should be set to full URL like:
-  // https://papermaster-production-c4fe.up.railway.app/api/auth/google/callback
+  // CRITICAL: In production, GOOGLE_CALLBACK_URL MUST be set to full URL!
+  // Example: https://papermaster-production-c4fe.up.railway.app/api/auth/google/callback
   //
-  // If not set, passport-google-oauth20 will use relative path '/api/auth/google/callback'
-  // which will be resolved relative to the request host
-  const callbackURL = process.env.GOOGLE_CALLBACK_URL || '/api/auth/google/callback';
+  // If not set, we use relative path '/api/auth/google/callback'
+  // passport-google-oauth20 will resolve this relative to the request host,
+  // but it may not match the full URL used in authorization, causing invalid_grant errors
+  let callbackURL = process.env.GOOGLE_CALLBACK_URL;
+  
+  if (!callbackURL) {
+    // In production (Railway), try to construct from RAILWAY_PUBLIC_DOMAIN or use relative path
+    // Note: Relative path may cause issues if authorization URL uses full URL
+    const railwayDomain = process.env.RAILWAY_PUBLIC_DOMAIN;
+    if (railwayDomain) {
+      callbackURL = `https://${railwayDomain}/api/auth/google/callback`;
+      console.log(`🔐 Constructed callback URL from RAILWAY_PUBLIC_DOMAIN: ${callbackURL}`);
+    } else {
+      callbackURL = '/api/auth/google/callback';
+      console.warn('⚠️  WARNING: GOOGLE_CALLBACK_URL not set! Using relative path.');
+      console.warn('⚠️  This may cause invalid_grant errors if authorization URL uses full URL.');
+      console.warn('⚠️  Please set GOOGLE_CALLBACK_URL environment variable in Railway.');
+    }
+  }
   
   console.log(`🔐 Google OAuth Strategy callback URL: ${callbackURL}`);
   console.log(`⚠️  Make sure this matches the redirect_uri in authorization URL and Google Cloud Console`);
