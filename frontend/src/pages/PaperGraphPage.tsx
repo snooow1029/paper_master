@@ -436,13 +436,18 @@ const PaperGraphPage: React.FC<PaperGraphPageProps> = ({ setSessionHandler }) =>
   // Update current session with edited graph data
   const updateCurrentSession = async () => {
     if (!isAuthenticated() || !currentSessionId || !graphData) {
-      console.log('Cannot update: not authenticated or no session');
+      console.log('Cannot update: not authenticated or no session or no graphData');
       return;
     }
 
     try {
       const token = localStorage.getItem('authToken');
-      if (!token) return;
+      if (!token) {
+        console.warn('No auth token available');
+        return;
+      }
+
+      console.log(`💾 Updating session ${currentSessionId} with ${graphData.nodes?.length || 0} nodes and ${graphData.edges?.length || 0} edges`);
 
       const updateResponse = await fetch(`${API_BASE_URL}/api/sessions/${currentSessionId}/update-graph`, {
         method: 'PUT',
@@ -456,9 +461,11 @@ const PaperGraphPage: React.FC<PaperGraphPageProps> = ({ setSessionHandler }) =>
       });
 
       if (updateResponse.ok) {
-        console.log('✅ Session graph updated');
+        const result = await updateResponse.json();
+        console.log('✅ Session graph updated:', result);
       } else {
-        console.warn('Failed to update session:', await updateResponse.text());
+        const errorText = await updateResponse.text();
+        console.warn('Failed to update session:', errorText);
       }
     } catch (error) {
       console.error('Error updating session:', error);

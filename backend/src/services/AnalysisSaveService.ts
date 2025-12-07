@@ -239,31 +239,41 @@ export class AnalysisSaveService {
     }
 
     // Combine all relationship graphs from analyses
+    // Since all analyses should have the same complete graph, we can use the first one
+    // But we'll still merge to be safe
     const allNodes = new Map<string, any>();
     const allEdges = new Map<string, any>();
 
     for (const analysis of session.analyses) {
       if (analysis.relationshipGraph) {
         // Add nodes
-        for (const node of analysis.relationshipGraph.nodes) {
-          if (!allNodes.has(node.id)) {
-            allNodes.set(node.id, node);
+        if (analysis.relationshipGraph.nodes) {
+          for (const node of analysis.relationshipGraph.nodes) {
+            if (!allNodes.has(node.id)) {
+              allNodes.set(node.id, node);
+            }
           }
         }
 
         // Add edges
-        for (const edge of analysis.relationshipGraph.edges) {
-          if (!allEdges.has(edge.id)) {
-            allEdges.set(edge.id, edge);
+        if (analysis.relationshipGraph.edges) {
+          for (const edge of analysis.relationshipGraph.edges) {
+            if (!allEdges.has(edge.id)) {
+              allEdges.set(edge.id, edge);
+            }
           }
         }
       }
     }
 
-    return {
+    const result = {
       nodes: Array.from(allNodes.values()),
       edges: Array.from(allEdges.values()),
     };
+
+    console.log(`📥 Loading session ${sessionId}: ${result.nodes.length} nodes, ${result.edges.length} edges`);
+
+    return result;
   }
 
   /**
@@ -294,47 +304,39 @@ export class AnalysisSaveService {
       paperIdMap.set(paper.id, paper.id);
     });
 
-    // Update all Analysis records with new graph data
+    // Create a single relationship graph with ALL nodes and edges
+    // This ensures we preserve the complete graph structure
+    const relationshipGraph = {
+      nodes: graphData.nodes.map(n => ({
+        ...n,
+        id: paperIdMap.get(n.id) || n.id,
+        label: n.label || '',
+      })),
+      edges: graphData.edges.map(e => ({
+        ...e,
+        id: e.id,
+        from: paperIdMap.get(e.from) || e.from,
+        to: paperIdMap.get(e.to) || e.to,
+        label: e.label || '',
+      })),
+    };
+
+    console.log(`💾 Updating session ${sessionId} with ${relationshipGraph.nodes.length} nodes and ${relationshipGraph.edges.length} edges`);
+
+    // Update all Analysis records with the complete graph data
     const updatedAnalyses: Analysis[] = [];
 
     for (const paper of existingPapers) {
-      // Find corresponding node in graphData
-      const node = graphData.nodes.find(n => {
-        if (n.url && n.url === paper.url) return true;
-        return n.id === paper.id;
-      });
-
-      // Get edges related to this paper
-      const relatedEdges = graphData.edges.filter(
-        e => e.from === node?.id || e.to === node?.id
-      );
-
-      // Create updated relationship graph
-      const relationshipGraph = {
-        nodes: graphData.nodes.map(n => ({
-          ...n,
-          id: paperIdMap.get(n.id) || n.id,
-          label: n.label || '',
-        })),
-        edges: relatedEdges.map(e => ({
-          ...e,
-          id: e.id,
-          from: paperIdMap.get(e.from) || e.from,
-          to: paperIdMap.get(e.to) || e.to,
-          label: e.label || '',
-        })),
-      };
-
       // Find or create Analysis record
       let analysis = await analysisRepository.findOne({
         where: { sessionId, paperId: paper.id },
       });
 
       if (analysis) {
-        // Update existing analysis
+        // Update existing analysis with complete graph
         analysis.relationshipGraph = relationshipGraph;
       } else {
-        // Create new analysis
+        // Create new analysis with complete graph
         analysis = analysisRepository.create({
           sessionId,
           paperId: paper.id,
