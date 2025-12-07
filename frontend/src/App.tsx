@@ -43,12 +43,35 @@ function App() {
     console.log('🔧 App: sessionHandler updated', !!sessionHandler);
   }, [sessionHandler]);
 
+  // Store pending session selection if handler is not ready
+  const pendingSelectionRef = React.useRef<{ sessionId: string; graphData: any } | null>(null);
+
+  const handleSessionSelect = React.useCallback((sessionId: string, graphData: any) => {
+    if (sessionHandler) {
+      sessionHandler(sessionId, graphData);
+      pendingSelectionRef.current = null;
+    } else {
+      console.log('⏳ App: Handler not ready, storing pending selection');
+      pendingSelectionRef.current = { sessionId, graphData };
+    }
+  }, [sessionHandler]);
+
+  // Process pending selection when handler becomes available
+  React.useEffect(() => {
+    if (sessionHandler && pendingSelectionRef.current) {
+      console.log('✅ App: Processing pending selection');
+      const { sessionId, graphData } = pendingSelectionRef.current;
+      sessionHandler(sessionId, graphData);
+      pendingSelectionRef.current = null;
+    }
+  }, [sessionHandler]);
+
   return (
     <ThemeProvider theme={theme}>
       <CssBaseline />
       <Router>
         <LoginHandler />
-        <MainLayout onSelectSession={sessionHandler}>
+        <MainLayout onSelectSession={handleSessionSelect}>
           <Routes>
             <Route path="/test" element={<TestPage />} />
             <Route path="/" element={<PaperGraphPage setSessionHandler={setSessionHandler} />} />

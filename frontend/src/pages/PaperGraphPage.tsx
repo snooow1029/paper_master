@@ -473,11 +473,18 @@ const PaperGraphPage: React.FC<PaperGraphPageProps> = ({ setSessionHandler }) =>
     console.log('✅ Loaded session:', sessionId);
   }, []);
 
-  // Register session handler with parent component
+  // Register session handler with parent component immediately
   useEffect(() => {
     if (setSessionHandler) {
       console.log('📤 Registering session handler');
       setSessionHandler(handleSessionSelect);
+      // Return cleanup function to unregister
+      return () => {
+        console.log('📤 Unregistering session handler');
+        if (setSessionHandler) {
+          setSessionHandler(() => undefined);
+        }
+      };
     }
   }, [setSessionHandler, handleSessionSelect]);
 
