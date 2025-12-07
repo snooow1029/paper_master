@@ -53,34 +53,9 @@ const preventDuplicateCallback = (req: Request, res: Response, next: NextFunctio
 // Google OAuth routes
 router.get(
   '/google',
-  (req: Request, res: Response, next: any) => {
-    // Manually build Google OAuth authorization URL with prompt=select_account
-    const googleClientId = process.env.GOOGLE_CLIENT_ID;
-    
-    // Use the same callback URL logic as passport.ts
-    // If GOOGLE_CALLBACK_URL is set, use it; otherwise construct from request
-    let callbackURL = process.env.GOOGLE_CALLBACK_URL;
-    if (!callbackURL) {
-      // Construct full URL from request
-      callbackURL = `${req.protocol}://${req.get('host')}/api/auth/google/callback`;
-    }
-    
-    console.log(`🔐 OAuth authorization redirect_uri: ${callbackURL}`);
-    
-    if (!googleClientId) {
-      return res.status(500).json({ error: 'Google OAuth not configured' });
-    }
-
-    const authUrl = new URL('https://accounts.google.com/o/oauth2/v2/auth');
-    authUrl.searchParams.set('client_id', googleClientId);
-    authUrl.searchParams.set('redirect_uri', callbackURL);
-    authUrl.searchParams.set('response_type', 'code');
-    authUrl.searchParams.set('scope', 'profile email');
-    authUrl.searchParams.set('prompt', 'select_account'); // Force account selection screen every time
-    authUrl.searchParams.set('access_type', 'offline');
-
-    return res.redirect(authUrl.toString());
-  }
+  passport.authenticate('google', { 
+    scope: ['profile', 'email']
+  })
 );
 
 router.get(
@@ -101,15 +76,10 @@ router.get(
     // Since we can't modify passport strategy at runtime, we must ensure
     // GOOGLE_CALLBACK_URL environment variable is set in production
     
-    const expectedCallbackURL = process.env.GOOGLE_CALLBACK_URL || `${req.protocol}://${req.get('host')}/api/auth/google/callback`;
-    console.log(`🔐 Expected callback URL: ${expectedCallbackURL}`);
-    console.log(`🔐 Strategy callback URL: ${process.env.GOOGLE_CALLBACK_URL || '/api/auth/google/callback'}`);
-    
-    if (!process.env.GOOGLE_CALLBACK_URL) {
-      console.warn('⚠️  WARNING: GOOGLE_CALLBACK_URL not set!');
-      console.warn('⚠️  This may cause invalid_grant errors if Strategy uses relative path');
-      console.warn('⚠️  Please set GOOGLE_CALLBACK_URL environment variable in Railway');
-    }
+    // Log callback URL for debugging
+    const callbackURL = process.env.GOOGLE_CALLBACK_URL || 
+      (process.env.RAILWAY_PUBLIC_DOMAIN ? `https://${process.env.RAILWAY_PUBLIC_DOMAIN}/api/auth/google/callback` : '/api/auth/google/callback');
+    console.log(`🔐 Callback URL: ${callbackURL}`);
     
     passport.authenticate('google', { session: false }, (err: any, user: any, info: any) => {
       console.log('🔐 Passport authenticate result:');
