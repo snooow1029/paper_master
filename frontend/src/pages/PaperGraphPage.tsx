@@ -3,6 +3,7 @@ import GraphVisualization from '../components/GraphVisualization';
 import AnalysisProgress from '../components/AnalysisProgress';
 import { GraphData } from '../types/graph';
 import { isAuthenticated } from '../utils/auth';
+import { useLoadSession } from '../hooks/useLoadSession';
 import '../styles/theme.css';
 import {
   Edit as EditIcon,
@@ -472,6 +473,18 @@ const PaperGraphPage: React.FC<PaperGraphPageProps> = ({ setSessionHandler }) =>
     }
   };
 
+  // Use hook to load session data when currentSessionId changes
+  const { graphData: loadedGraphData, loading: sessionLoading } = useLoadSession(currentSessionId);
+
+  // Update graphData when session is loaded via hook
+  useEffect(() => {
+    if (loadedGraphData && currentSessionId) {
+      console.log('📥 PaperGraphPage: Session loaded via hook:', currentSessionId, 'with', loadedGraphData.nodes.length, 'nodes and', loadedGraphData.edges.length, 'edges');
+      setGraphData(loadedGraphData);
+      setViewMode('graph');
+    }
+  }, [loadedGraphData, currentSessionId]);
+
   // Handle session selection from HistorySidebar
   const handleSessionSelect = useCallback((sessionId: string, graphData: any) => {
     console.log('📥 PaperGraphPage: Received session selection:', sessionId, graphData);
@@ -479,15 +492,14 @@ const PaperGraphPage: React.FC<PaperGraphPageProps> = ({ setSessionHandler }) =>
       console.error('❌ PaperGraphPage: sessionId is undefined!');
       return;
     }
-    if (!graphData || !graphData.nodes) {
-      console.error('❌ PaperGraphPage: graphData is invalid!', graphData);
-      return;
-    }
+    // Set session ID - the hook will automatically load the sanitized data
     setCurrentSessionId(sessionId);
-    setGraphData(graphData);
-    // Switch to graph view mode
-    setViewMode('graph');
-    console.log('✅ PaperGraphPage: Loaded session:', sessionId, 'with', graphData.nodes.length, 'nodes');
+    // Also set graphData immediately if provided (for faster initial render)
+    if (graphData && graphData.nodes) {
+      setGraphData(graphData);
+      setViewMode('graph');
+      console.log('✅ PaperGraphPage: Loaded session immediately:', sessionId, 'with', graphData.nodes.length, 'nodes');
+    }
   }, []);
 
   // Register session handler with parent component immediately on mount
@@ -1588,9 +1600,10 @@ const PaperGraphPage: React.FC<PaperGraphPageProps> = ({ setSessionHandler }) =>
               {graphData ? (
                 <div style={{ flex: 1, position: 'relative', width: '100%', height: '100%' }}>
                   <GraphVisualization 
+                    key={currentSessionId || 'default'} // Force re-render when session changes
                     data={graphData} 
                     onDataUpdate={handleGraphDataUpdate}
-                    isLoading={isLoading}
+                    isLoading={isLoading || sessionLoading}
                   />
                 </div>
               ) : (
