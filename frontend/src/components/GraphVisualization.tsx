@@ -44,8 +44,8 @@ const GraphVisualization: React.FC<GraphVisualizationProps> = ({
   // Helper function to check if a node has edges
   const hasEdges = React.useCallback((nodeId: string): boolean => {
     return data.edges.some(edge => {
-      const sourceId = typeof edge.source === 'string' ? edge.source : (edge.source as Node).id;
-      const targetId = typeof edge.target === 'string' ? edge.target : (edge.target as Node).id;
+      const sourceId = edge.from || (typeof edge.source === 'string' ? edge.source : (edge.source as Node)?.id);
+      const targetId = edge.to || (typeof edge.target === 'string' ? edge.target : (edge.target as Node)?.id);
       return sourceId === nodeId || targetId === nodeId;
     });
   }, [data.edges]);
@@ -58,8 +58,8 @@ const GraphVisualization: React.FC<GraphVisualizationProps> = ({
       ...data,
       nodes: data.nodes.filter(node => !selectedNodeIds.has(node.id)),
       edges: data.edges.filter(edge => {
-        const sourceId = typeof edge.source === 'string' ? edge.source : (edge.source as Node).id;
-        const targetId = typeof edge.target === 'string' ? edge.target : (edge.target as Node).id;
+        const sourceId = edge.from || (typeof edge.source === 'string' ? edge.source : (edge.source as Node)?.id);
+        const targetId = edge.to || (typeof edge.target === 'string' ? edge.target : (edge.target as Node)?.id);
         return !selectedNodeIds.has(sourceId) && !selectedNodeIds.has(targetId);
       })
     };
@@ -208,8 +208,8 @@ const GraphVisualization: React.FC<GraphVisualizationProps> = ({
     
     // Find connected edges BEFORE edit
     const connectedEdgesBefore = data.edges.filter(e => {
-      const sourceId = typeof e.source === 'string' ? e.source : e.source.id;
-      const targetId = typeof e.target === 'string' ? e.target : e.target.id;
+      const sourceId = e.from || (typeof e.source === 'string' ? e.source : e.source?.id);
+      const targetId = e.to || (typeof e.target === 'string' ? e.target : e.target?.id);
       return sourceId === editNodeData.id || targetId === editNodeData.id;
     });
     console.log('🔗 Connected edges BEFORE edit:', connectedEdgesBefore);
@@ -221,8 +221,8 @@ const GraphVisualization: React.FC<GraphVisualizationProps> = ({
     
     // 🔧 FIX: Update edges to reference the new node objects
     const newEdges = data.edges.map(edge => {
-      const sourceId = typeof edge.source === 'string' ? edge.source : edge.source.id;
-      const targetId = typeof edge.target === 'string' ? edge.target : edge.target.id;
+      const sourceId = edge.from || (typeof edge.source === 'string' ? edge.source : edge.source?.id);
+      const targetId = edge.to || (typeof edge.target === 'string' ? edge.target : edge.target?.id);
       
       // Find the corresponding new node objects
       const newSourceNode = newNodes.find(n => n.id === sourceId);
@@ -243,8 +243,8 @@ const GraphVisualization: React.FC<GraphVisualizationProps> = ({
     
     // Find connected edges AFTER edit
     const connectedEdgesAfter = newData.edges.filter(e => {
-      const sourceId = typeof e.source === 'string' ? e.source : e.source.id;
-      const targetId = typeof e.target === 'string' ? e.target : e.target.id;
+      const sourceId = e.from || (typeof e.source === 'string' ? e.source : e.source?.id);
+      const targetId = e.to || (typeof e.target === 'string' ? e.target : e.target?.id);
       return sourceId === editNodeData.id || targetId === editNodeData.id;
     });
     console.log('✅ Updated node after edit:', newData.nodes.find(n => n.id === editNodeData.id));
@@ -271,8 +271,8 @@ const GraphVisualization: React.FC<GraphVisualizationProps> = ({
     const newData = {
       ...data,
       edges: data.edges.map(edge => {
-        const sourceId = typeof edge.source === 'string' ? edge.source : (edge.source as Node).id;
-        const targetId = typeof edge.target === 'string' ? edge.target : (edge.target as Node).id;
+        const sourceId = edge.from || (typeof edge.source === 'string' ? edge.source : (edge.source as Node)?.id);
+        const targetId = edge.to || (typeof edge.target === 'string' ? edge.target : (edge.target as Node)?.id);
         if (sourceId === editEdgeData.source && targetId === editEdgeData.target) {
             return { ...edge, ...editEdgeData };
         }
@@ -359,17 +359,33 @@ const GraphVisualization: React.FC<GraphVisualizationProps> = ({
       : data.nodes.filter(node => {
           // Check if node has at least one edge
           return data.edges.some(edge => {
-            const sourceId = typeof edge.source === 'string' ? edge.source : (edge.source as Node).id;
-            const targetId = typeof edge.target === 'string' ? edge.target : (edge.target as Node).id;
+            const sourceId = edge.from || (typeof edge.source === 'string' ? edge.source : (edge.source as Node)?.id);
+            const targetId = edge.to || (typeof edge.target === 'string' ? edge.target : (edge.target as Node)?.id);
             return sourceId === node.id || targetId === node.id;
           });
         });
     const visibleNodeIds = new Set(filteredNodes.map(n => n.id));
-    const filteredEdges = data.edges.filter(edge => {
-      const sourceId = typeof edge.source === 'string' ? edge.source : (edge.source as Node).id;
-      const targetId = typeof edge.target === 'string' ? edge.target : (edge.target as Node).id;
-      return visibleNodeIds.has(sourceId) && visibleNodeIds.has(targetId);
-    });
+    // Convert edges from 'from/to' format to 'source/target' format for D3
+    // D3 forceLink expects source/target to be node IDs (strings), which it will resolve to node objects
+    const filteredEdges = data.edges
+      .map(edge => {
+        // Support both 'from/to' and 'source/target' formats
+        const sourceId = edge.from || (typeof edge.source === 'string' ? edge.source : (edge.source as Node)?.id);
+        const targetId = edge.to || (typeof edge.target === 'string' ? edge.target : (edge.target as Node)?.id);
+        // Ensure source and target are strings (node IDs)
+        const sourceIdStr = typeof sourceId === 'string' ? sourceId : String(sourceId);
+        const targetIdStr = typeof targetId === 'string' ? targetId : String(targetId);
+        return {
+          ...edge,
+          source: sourceIdStr, // D3 will resolve this to node object
+          target: targetIdStr, // D3 will resolve this to node object
+        };
+      })
+      .filter(edge => {
+        const sourceId = typeof edge.source === 'string' ? edge.source : String(edge.source);
+        const targetId = typeof edge.target === 'string' ? edge.target : String(edge.target);
+        return sourceId && targetId && visibleNodeIds.has(sourceId) && visibleNodeIds.has(targetId);
+      });
 
     // Use D3 join pattern to properly handle enter/update/exit
     const links = g.selectAll('.link')

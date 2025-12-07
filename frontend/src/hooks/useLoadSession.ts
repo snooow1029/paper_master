@@ -88,25 +88,25 @@ function sanitizeGraphData(graphData: any): GraphData {
     label: String(node.label || node.title || ''),
   }));
 
-  // Sanitize edges: ensure from, to, and id are strings
+  // Sanitize edges: convert from/to to source/target format for D3 compatibility
   const sanitizedEdges = (graphData.edges || []).map((edge: any, index: number) => {
     // Support both 'from/to' and 'source/target' formats
-    const fromId = edge.from || edge.source;
-    const toId = edge.to || edge.target;
+    const sourceId = edge.from || edge.source;
+    const targetId = edge.to || edge.target;
     
     // Extract ID if source/target are objects
-    const fromIdStr = typeof fromId === 'string' 
-      ? fromId 
-      : (fromId?.id ? String(fromId.id) : String(fromId));
-    const toIdStr = typeof toId === 'string' 
-      ? toId 
-      : (toId?.id ? String(toId.id) : String(toId));
+    const sourceIdStr = typeof sourceId === 'string' 
+      ? sourceId 
+      : (sourceId?.id ? String(sourceId.id) : String(sourceId));
+    const targetIdStr = typeof targetId === 'string' 
+      ? targetId 
+      : (targetId?.id ? String(targetId.id) : String(targetId));
 
     return {
       ...edge,
-      id: String(edge.id || `edge-${fromIdStr}-${toIdStr}-${index}`),
-      from: fromIdStr,
-      to: toIdStr,
+      id: String(edge.id || `edge-${sourceIdStr}-${targetIdStr}-${index}`),
+      source: sourceIdStr, // Use source/target for D3 compatibility
+      target: targetIdStr,
       // Ensure label is a string if present
       label: edge.label ? String(edge.label) : undefined,
       // Preserve other edge properties
@@ -114,6 +114,9 @@ function sanitizeGraphData(graphData: any): GraphData {
       strength: edge.strength,
       evidence: edge.evidence,
       description: edge.description,
+      // Remove from/to to avoid confusion
+      from: undefined,
+      to: undefined,
     };
   });
 
