@@ -147,6 +147,18 @@ export class AnalysisSaveService {
     papers: PaperData[],
     graphData: GraphData
   ): Promise<{ session: Session; analyses: Analysis[] }> {
+    console.log(`\n🔵 ========== SAVE ANALYSIS START ==========`);
+    console.log(`📥 Input graphData: ${graphData.nodes.length} nodes, ${graphData.edges.length} edges`);
+    console.log(`📥 Input edges sample (first 3):`, graphData.edges.slice(0, 3).map(e => {
+      const edgeAny = e as any;
+      return {
+        id: e.id,
+        from: edgeAny.from || edgeAny.source,
+        to: edgeAny.to || edgeAny.target,
+        label: e.label || e.relationship
+      };
+    }));
+    
     // Use provided title or generate from first paper
     const finalTitle = sessionTitle || this.generateSessionTitle(papers);
     const sessionRepository = AppDataSource.getRepository(Session);
@@ -156,6 +168,13 @@ export class AnalysisSaveService {
     // 1. Create Session with graphSnapshot (Snapshot Layer)
     // Normalize graphData to ensure edges use 'from/to' format before saving
     const normalizedGraphData = this.normalizeGraphData(graphData);
+    console.log(`🔄 After normalization: ${normalizedGraphData.nodes.length} nodes, ${normalizedGraphData.edges.length} edges`);
+    console.log(`🔄 Normalized edges sample (first 3):`, normalizedGraphData.edges.slice(0, 3).map(e => ({
+      id: e.id,
+      from: e.from,
+      to: e.to,
+      label: e.label
+    })));
     const session = sessionRepository.create({
       userId,
       title: finalTitle,
@@ -241,6 +260,16 @@ export class AnalysisSaveService {
         }),
       };
 
+      console.log(`  📦 Analysis for paper ${savedPaper.id}: relationshipGraph has ${relationshipGraph.nodes.length} nodes, ${relationshipGraph.edges.length} edges`);
+      if (relationshipGraph.edges.length > 0) {
+        console.log(`  📦 Edges sample:`, relationshipGraph.edges.slice(0, 2).map(e => ({
+          id: e.id,
+          from: e.from,
+          to: e.to,
+          label: e.label
+        })));
+      }
+
       const analysis = analysisRepository.create({
         sessionId: savedSession.id,
         paperId: savedPaper.id,
@@ -250,7 +279,16 @@ export class AnalysisSaveService {
       analyses.push(analysis);
     }
 
+    console.log(`💾 Saving ${analyses.length} Analysis records...`);
     const savedAnalyses = await analysisRepository.save(analyses);
+    console.log(`✅ Saved ${savedAnalyses.length} Analysis records`);
+    
+    // Verify saved data
+    for (const analysis of savedAnalyses.slice(0, 2)) {
+      if (analysis.relationshipGraph && analysis.relationshipGraph.edges) {
+        console.log(`  ✅ Verified Analysis ${analysis.id}: ${analysis.relationshipGraph.edges.length} edges in DB`);
+      }
+    }
 
     // 4. Save paper relationships (PaperRelation)
     const relationsToSave: PaperRelation[] = [];
@@ -307,6 +345,9 @@ export class AnalysisSaveService {
     // 5. Build Knowledge Graph Layer (Many-to-Many relationships)
     await this.buildKnowledgeGraph(graphData, savedPapers, paperIdMap);
     console.log(`✅ Built knowledge graph with ${savedPapers.length} papers`);
+    
+    console.log(`🔵 ========== SAVE ANALYSIS END ==========`);
+    console.log(`📤 Returning: Session ${savedSession.id} with ${savedAnalyses.length} analyses`);
 
     return {
       session: savedSession,
@@ -374,6 +415,9 @@ export class AnalysisSaveService {
    * Get full graph data for a session
    */
   async getSessionGraphData(sessionId: string): Promise<GraphData | null> {
+    console.log(`\n🟢 ========== GET SESSION GRAPH DATA START ==========`);
+    console.log(`📥 Loading session: ${sessionId}`);
+    
     const analysisRepository = AppDataSource.getRepository(Analysis);
     const sessionRepository = AppDataSource.getRepository(Session);
 
@@ -383,8 +427,11 @@ export class AnalysisSaveService {
     });
 
     if (!session || !session.analyses || session.analyses.length === 0) {
+      console.log(`❌ Session not found or has no analyses`);
       return null;
     }
+
+    console.log(`📊 Found session with ${session.analyses.length} analyses`);
 
     // Combine all relationship graphs from analyses
     // Since all analyses should have the same complete graph, we can use the first one
@@ -396,53 +443,79 @@ export class AnalysisSaveService {
     
     for (const analysis of session.analyses) {
       if (analysis.relationshipGraph) {
+        console.log(`  📦 Analysis ${analysis.id} (paperId: ${analysis.paperId}):`);
+        console.log(`     - relationshipGraph exists: true`);
+        
         // Add nodes
         if (analysis.relationshipGraph.nodes) {
-          console.log(`  Analysis ${analysis.id}: ${analysis.relationshipGraph.nodes.length} nodes`);
+          console.log(`     - nodes: ${analysis.relationshipGraph.nodes.length}`);
           for (const node of analysis.relationshipGraph.nodes) {
             if (!allNodes.has(node.id)) {
               allNodes.set(node.id, node);
             }
           }
+        } else {
+          console.log(`     - nodes: null or undefined`);
         }
 
         // Add edges
         if (analysis.relationshipGraph.edges) {
-          console.log(`  Analysis ${analysis.id}: ${analysis.relationshipGraph.edges.length} edges`);
+          console.log(`     - edges: ${analysis.relationshipGraph.edges.length}`);
+          if (analysis.relationshipGraph.edges.length > 0) {
+            console.log(`     - edges sample (first 2):`, analysis.relationshipGraph.edges.slice(0, 2).map((e: any) => ({
+              id: e.id,
+              from: e.from || e.source,
+              to: e.to || e.target,
+              label: e.label
+            })));
+          }
+          
           for (const edge of analysis.relationshipGraph.edges) {
             // Ensure edge has an ID for deduplication
             const edgeAny = edge as any;
-            const edgeId = edgeAny.id || `edge-${edgeAny.from || edgeAny.source}-${edgeAny.to || edgeAny.target}`;
+            const fromId = edgeAny.from || edgeAny.source;
+            const toId = edgeAny.to || edgeAny.target;
+            const edgeId = edgeAny.id || `edge-${fromId}-${toId}`;
+            
             if (!allEdges.has(edgeId)) {
               allEdges.set(edgeId, {
                 ...edge,
                 id: edgeId,
                 // Ensure both from/to and source/target formats exist
-                from: edgeAny.from || edgeAny.source,
-                to: edgeAny.to || edgeAny.target,
-                source: edgeAny.source || edgeAny.from,
-                target: edgeAny.target || edgeAny.to,
+                from: fromId,
+                to: toId,
+                source: fromId,
+                target: toId,
               });
             } else {
-              console.log(`    Skipping duplicate edge: ${edgeId}`);
+              console.log(`     ⚠️ Skipping duplicate edge: ${edgeId}`);
             }
           }
         } else {
-          console.log(`  Analysis ${analysis.id}: No edges in relationshipGraph`);
+          console.log(`     - edges: null or undefined`);
         }
       } else {
-        console.log(`  Analysis ${analysis.id}: No relationshipGraph`);
+        console.log(`  ❌ Analysis ${analysis.id}: No relationshipGraph`);
       }
     }
     
     console.log(`📊 Merged result: ${allNodes.size} unique nodes, ${allEdges.size} unique edges`);
+    if (allEdges.size > 0) {
+      console.log(`📊 Merged edges sample (first 3):`, Array.from(allEdges.values()).slice(0, 3).map((e: any) => ({
+        id: e.id,
+        from: e.from || e.source,
+        to: e.to || e.target,
+        label: e.label
+      })));
+    }
 
     const result = {
       nodes: Array.from(allNodes.values()),
       edges: Array.from(allEdges.values()),
     };
 
-    console.log(`📥 Loading session ${sessionId}: ${result.nodes.length} nodes, ${result.edges.length} edges`);
+    console.log(`📥 Final result: ${result.nodes.length} nodes, ${result.edges.length} edges`);
+    console.log(`🟢 ========== GET SESSION GRAPH DATA END ==========\n`);
 
     return result;
   }
