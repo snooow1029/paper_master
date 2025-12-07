@@ -1,6 +1,7 @@
 import { AppDataSource } from '../config/database';
 import { Session } from '../entities/Session';
 import { User } from '../entities/User';
+import { AnalysisSaveService, GraphData } from './AnalysisSaveService';
 
 export class SessionService {
   /**
@@ -78,6 +79,25 @@ export class SessionService {
     const sessionRepository = AppDataSource.getRepository(Session);
     const result = await sessionRepository.delete({ id: sessionId, userId });
     return (result.affected || 0) > 0;
+  }
+
+  /**
+   * Get full graph data for a session
+   */
+  async getSessionGraphData(sessionId: string, userId?: string): Promise<GraphData | null> {
+    const sessionRepository = AppDataSource.getRepository(Session);
+    const where: any = { id: sessionId };
+    if (userId) {
+      where.userId = userId;
+    }
+
+    const session = await sessionRepository.findOne({ where });
+    if (!session) {
+      return null;
+    }
+
+    const analysisSaveService = new AnalysisSaveService();
+    return await analysisSaveService.getSessionGraphData(sessionId);
   }
 }
 

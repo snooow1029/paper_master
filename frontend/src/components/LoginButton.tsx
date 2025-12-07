@@ -48,7 +48,7 @@ export default function LoginButton({ onLogin }: LoginButtonProps) {
   };
 
   if (loading) {
-    return <Button disabled>检查中...</Button>;
+    return <Button disabled>Checking...</Button>;
   }
 
   if (authenticated && user) {
@@ -65,7 +65,7 @@ export default function LoginButton({ onLogin }: LoginButtonProps) {
           },
         }}
       >
-        登出 ({user.name || user.email})
+        Logout ({user.name || user.email})
       </Button>
     );
   }
@@ -83,7 +83,7 @@ export default function LoginButton({ onLogin }: LoginButtonProps) {
         },
       }}
     >
-      使用 Google 登入
+      Sign in with Google
     </Button>
   );
 }

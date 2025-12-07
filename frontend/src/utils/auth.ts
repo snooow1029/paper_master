@@ -1,39 +1,39 @@
 /**
- * 认证工具函数
+ * Authentication utility functions
  */
 
 const API_BASE_URL = import.meta.env.VITE_API_BASE_URL || '';
 
 /**
- * 获取存储的 token
+ * Get stored token
  */
 export function getAuthToken(): string | null {
   return localStorage.getItem('authToken');
 }
 
 /**
- * 设置 token
+ * Set token
  */
 export function setAuthToken(token: string): void {
   localStorage.setItem('authToken', token);
 }
 
 /**
- * 清除 token（登出）
+ * Clear token (logout)
  */
 export function clearAuthToken(): void {
   localStorage.removeItem('authToken');
 }
 
 /**
- * 检查是否已登录
+ * Check if user is authenticated
  */
 export function isAuthenticated(): boolean {
   return !!getAuthToken();
 }
 
 /**
- * 获取认证 headers
+ * Get authentication headers
  */
 export function getAuthHeaders(): HeadersInit {
   const token = getAuthToken();
@@ -44,12 +44,12 @@ export function getAuthHeaders(): HeadersInit {
 }
 
 /**
- * 获取当前用户信息
+ * Get current user information
  */
 export async function getCurrentUser() {
   const token = getAuthToken();
   if (!token) {
-    throw new Error('未登录');
+    throw new Error('Not authenticated');
   }
 
   const response = await fetch(`${API_BASE_URL}/api/auth/me`, {
@@ -61,16 +61,16 @@ export async function getCurrentUser() {
   if (!response.ok) {
     if (response.status === 401) {
       clearAuthToken();
-      throw new Error('登录已过期，请重新登录');
+      throw new Error('Login expired, please login again');
     }
-    throw new Error('获取用户信息失败');
+    throw new Error('Failed to get user information');
   }
 
   return response.json();
 }
 
 /**
- * 登出
+ * Logout
  */
 export function logout(): void {
   clearAuthToken();

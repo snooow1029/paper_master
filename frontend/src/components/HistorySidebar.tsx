@@ -82,7 +82,7 @@ export default function HistorySidebar({ open, onClose, onSelectSession }: Histo
 
   const formatDate = (dateString: string) => {
     const date = new Date(dateString);
-    return date.toLocaleDateString('zh-TW', {
+    return date.toLocaleDateString('en-US', {
       year: 'numeric',
       month: 'short',
       day: 'numeric',
@@ -107,7 +107,7 @@ export default function HistorySidebar({ open, onClose, onSelectSession }: Histo
       <Box sx={{ p: 2 }}>
         <Box sx={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', mb: 2 }}>
           <Typography variant="h6" sx={{ fontWeight: 600 }}>
-            历史记录
+            History
           </Typography>
           <IconButton
             onClick={onClose}
@@ -148,7 +148,7 @@ export default function HistorySidebar({ open, onClose, onSelectSession }: Histo
               </Avatar>
               <Box>
                 <Typography variant="body1" sx={{ fontWeight: 600 }}>
-                  {user.name || '用户'}
+                  {user.name || 'User'}
                 </Typography>
                 <Typography variant="body2" sx={{ color: '#b8b8b8', fontSize: '0.85rem' }}>
                   {user.email}
@@ -166,7 +166,7 @@ export default function HistorySidebar({ open, onClose, onSelectSession }: Histo
           </Box>
         ) : sessions.length === 0 ? (
           <Typography variant="body2" sx={{ color: '#b8b8b8', textAlign: 'center', p: 4 }}>
-            还没有历史记录
+            No history yet
           </Typography>
         ) : (
           <List>

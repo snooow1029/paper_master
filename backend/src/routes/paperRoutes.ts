@@ -1,11 +1,17 @@
 import { Router } from 'express';
 import { PaperController } from '../controllers/PaperController';
+import { AnalysisController } from '../controllers/AnalysisController';
+import { authenticateToken } from '../middleware/auth';
 
 const router = Router();
 const paperController = new PaperController();
+const analysisController = new AnalysisController();
 
-// Analyze multiple papers and generate graph
+// Analyze multiple papers and generate graph (public, no auth required)
 router.post('/analyze', paperController.analyzePapers.bind(paperController));
+
+// Analyze and save to database (requires authentication)
+router.post('/analyze-and-save', authenticateToken, analysisController.analyzeAndSave.bind(analysisController));
 
 // Analyze papers with citation network extraction
 router.post('/analyze-with-citations', paperController.analyzePapersWithCitations.bind(paperController));

@@ -17,6 +17,9 @@ router.get('/', sessionController.getUserSessions.bind(sessionController));
 // Get session by ID
 router.get('/:id', sessionController.getSessionById.bind(sessionController));
 
+// Get session graph data
+router.get('/:id/graph', sessionController.getSessionGraphData.bind(sessionController));
+
 // Update session
 router.put('/:id', sessionController.updateSession.bind(sessionController));
 

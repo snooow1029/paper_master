@@ -2,6 +2,7 @@ import React, { useState, useEffect, useRef } from 'react';
 import GraphVisualization from '../components/GraphVisualization';
 import AnalysisProgress from '../components/AnalysisProgress';
 import { GraphData } from '../types/graph';
+import { isAuthenticated } from '../utils/auth';
 import '../styles/theme.css';
 import {
   Edit as EditIcon,
@@ -286,7 +287,7 @@ const PaperGraphPage: React.FC = () => {
                 }
                 return res.json();
               })
-              .then(result => {
+              .then(async (result) => {
                 console.log('📥 Fetched task result:', result);
                 
                 // 後端可能直接返回 result，或者包裝在 result.result 中
@@ -330,7 +331,7 @@ const PaperGraphPage: React.FC = () => {
                     derivativeWorks: finalResult.originalPapers?.derivativeWorks
                   });
                   
-                  handleAnalysisResult(finalResult, validUrls);
+                  await handleAnalysisResult(finalResult, validUrls);
                 } else {
                   const errorMsg = result.error || analysisResult?.error || 'No graph data found in result';
                   console.error('❌ Result indicates failure:', errorMsg);
@@ -373,9 +374,62 @@ const PaperGraphPage: React.FC = () => {
     }
   };
 
+  // Save analysis result to database if user is authenticated
+  const saveAnalysisResult = async (result: any, validUrls: string[]) => {
+    if (!isAuthenticated()) {
+      console.log('User not authenticated, skipping save');
+      return;
+    }
+
+    try {
+      const token = localStorage.getItem('authToken');
+      if (!token) return;
+
+      // Extract graph data and papers from result
+      const graphData = result.graphData || result.graph || { nodes: [], edges: [] };
+      const papers = result.papers || result.originalPapers || [];
+
+      // Prepare data for saving (use save-result endpoint to avoid re-analysis)
+      const paperUrls = validUrls.length > 0 ? validUrls : papers.map((p: any) => p.url || p.id).filter(Boolean);
+      
+      if (paperUrls.length === 0 || !graphData.nodes || graphData.nodes.length === 0) {
+        console.warn('No URLs or graph data to save');
+        return;
+      }
+
+      // Use save-result endpoint to save without re-analyzing
+      const saveResponse = await fetch(`${API_BASE_URL}/api/analyses/save-result`, {
+        method: 'POST',
+        headers: {
+          'Authorization': `Bearer ${token}`,
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({
+          urls: paperUrls,
+          title: `Analysis - ${new Date().toLocaleDateString()}`,
+          graphData: graphData,
+          papers: papers.length > 0 ? papers : undefined,
+        }),
+      });
+
+      if (saveResponse.ok) {
+        const saveResult = await saveResponse.json();
+        console.log('✅ Analysis saved to session:', saveResult.session.id);
+      } else {
+        console.warn('Failed to save analysis:', await saveResponse.text());
+      }
+    } catch (error) {
+      console.error('Error saving analysis:', error);
+      // Don't throw, just log - saving is optional
+    }
+  };
+
   // Handle analysis result (extracted from original code)
-  const handleAnalysisResult = (result: any, validUrls: string[]) => {
+  const handleAnalysisResult = async (result: any, validUrls: string[]) => {
     console.log('📊 Received analysis result:', result);
+    
+    // Save to database if authenticated
+    await saveAnalysisResult(result, validUrls);
     
     // 更健壯的錯誤處理
     if (!result) {

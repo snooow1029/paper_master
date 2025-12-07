@@ -16,37 +16,37 @@ export default function LoginHandler() {
   useEffect(() => {
     if (token) {
       setStatus('processing');
-      setMessage('正在验证登录...');
+      setMessage('Verifying login...');
 
-      // 存储 token
+      // Store token
       setAuthToken(token);
 
-      // 验证 token 并获取用户信息
+      // Verify token and get user information
       getCurrentUser()
         .then((user) => {
-          console.log('✅ 登录成功:', user);
+          console.log('✅ Login successful:', user);
           setStatus('success');
-          setMessage(`欢迎，${user.name || user.email}！`);
+          setMessage(`Welcome, ${user.name || user.email}!`);
 
-          // 清除 URL 中的 token
+          // Clear token from URL
           searchParams.delete('token');
           setSearchParams(searchParams, { replace: true });
 
-          // 2 秒后清除消息
+          // Clear message after 2 seconds
           setTimeout(() => {
             setStatus('idle');
             setMessage('');
           }, 2000);
         })
         .catch((error) => {
-          console.error('❌ 登录验证失败:', error);
+          console.error('❌ Login verification failed:', error);
           setStatus('error');
-          setMessage('登录验证失败，请重新登录');
+          setMessage('Login verification failed, please try again');
 
-          // 清除无效的 token
+          // Clear invalid token
           localStorage.removeItem('authToken');
 
-          // 3 秒后清除消息
+          // Clear message after 3 seconds
           setTimeout(() => {
             setStatus('idle');
             setMessage('');
@@ -55,7 +55,7 @@ export default function LoginHandler() {
     }
   }, [token, searchParams, setSearchParams]);
 
-  // 显示状态消息（可选）
+  // Show status message (optional)
   if (status !== 'idle' && message) {
     return (
       <div
@@ -77,6 +77,6 @@ export default function LoginHandler() {
     );
   }
 
-  return null; // 不渲染任何内容
+  return null; // Don't render anything
 }
 

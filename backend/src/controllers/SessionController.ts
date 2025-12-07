@@ -1,5 +1,6 @@
 import { Request, Response } from 'express';
 import { SessionService } from '../services/SessionService';
+import { AnalysisSaveService } from '../services/AnalysisSaveService';
 
 export class SessionController {
   private sessionService: SessionService;
@@ -70,6 +71,34 @@ export class SessionController {
     } catch (error) {
       console.error('Error getting session:', error);
       res.status(500).json({ error: 'Failed to get session' });
+    }
+  }
+
+  /**
+   * Get full graph data for a session
+   */
+  async getSessionGraphData(req: Request, res: Response) {
+    try {
+      const userId = (req as any).user?.id;
+      const { id } = req.params;
+      
+      if (!userId) {
+        return res.status(401).json({ error: 'Not authenticated' });
+      }
+
+      const graphData = await this.sessionService.getSessionGraphData(id, userId);
+      
+      if (!graphData) {
+        return res.status(404).json({ error: 'Session not found or has no graph data' });
+      }
+
+      res.json({
+        sessionId: id,
+        graphData,
+      });
+    } catch (error) {
+      console.error('Error getting session graph data:', error);
+      res.status(500).json({ error: 'Failed to get session graph data' });
     }
   }
 
