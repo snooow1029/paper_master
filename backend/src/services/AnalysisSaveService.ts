@@ -491,15 +491,18 @@ export class AnalysisSaveService {
       })),
       edges: graphData.edges.map(e => {
         // Support both 'from/to' and 'source/target' formats
-        const fromId = e.from || (typeof e.source === 'string' ? e.source : (e.source as any)?.id);
-        const toId = e.to || (typeof e.target === 'string' ? e.target : (e.target as any)?.id);
+        const edgeAny = e as any;
+        const fromId = edgeAny.from || (typeof edgeAny.source === 'string' ? edgeAny.source : (edgeAny.source as any)?.id);
+        const toId = edgeAny.to || (typeof edgeAny.target === 'string' ? edgeAny.target : (edgeAny.target as any)?.id);
         const mappedFrom = paperIdMap.get(fromId) || fromId;
         const mappedTo = paperIdMap.get(toId) || toId;
         return {
           ...e,
-          id: e.id || `${mappedFrom}-${mappedTo}`,
+          id: e.id || `edge-${mappedFrom}-${mappedTo}`,
           from: mappedFrom,
           to: mappedTo,
+          source: mappedFrom, // Also include source/target for compatibility
+          target: mappedTo,
           label: e.label || e.relationship || '',
           // 明確保留 LLM 分析的關係信息
           relationship: e.relationship,
@@ -511,12 +514,15 @@ export class AnalysisSaveService {
     };
 
     console.log(`💾 Updating session ${sessionId} with ${relationshipGraph.nodes.length} nodes and ${relationshipGraph.edges.length} edges`);
-    console.log(`📊 RelationshipGraph edges sample:`, relationshipGraph.edges.slice(0, 3).map(e => ({
-      id: e.id,
-      from: e.from || e.source,
-      to: e.to || e.target,
-      label: e.label
-    })));
+    console.log(`📊 RelationshipGraph edges sample:`, relationshipGraph.edges.slice(0, 3).map(e => {
+      const edgeAny = e as any;
+      return {
+        id: e.id,
+        from: edgeAny.from || edgeAny.source,
+        to: edgeAny.to || edgeAny.target,
+        label: e.label
+      };
+    }));
 
     // Update all Analysis records with the complete graph data
     const updatedAnalyses: Analysis[] = [];
