@@ -486,9 +486,7 @@ const PaperGraphPage: React.FC<PaperGraphPageProps> = ({ setSessionHandler }) =>
         return;
       }
 
-      console.log(`\n🔴 ========== UPDATE SESSION GRAPH START ==========`);
-      console.log(`💾 Updating session ${currentSessionId} with ${data.nodes?.length || 0} nodes and ${data.edges?.length || 0} edges`);
-      if (data.edges && data.edges.length > 0) {
+           if (data.edges && data.edges.length > 0) {
         console.log(`💾 Edges sample (first 3):`, data.edges.slice(0, 3).map((e: any) => ({
           id: e.id,
           source: e.source,
@@ -515,7 +513,6 @@ const PaperGraphPage: React.FC<PaperGraphPageProps> = ({ setSessionHandler }) =>
       if (updateResponse.ok) {
         const result = await updateResponse.json();
         console.log('✅ Session graph updated:', result);
-        console.log(`🔴 ========== UPDATE SESSION GRAPH END ==========\n`);
       } else {
         const errorText = await updateResponse.text();
         console.warn('Failed to update session:', errorText);
@@ -545,7 +542,7 @@ const PaperGraphPage: React.FC<PaperGraphPageProps> = ({ setSessionHandler }) =>
       } else {
         console.log(`⚠️ WARNING: No edges in loaded graphData!`);
       }
-      console.log(`🟣 ========== PAPERGRAPHPAGE RECEIVE DATA END ==========\n`);
+
       setGraphData(loadedGraphData);
       setViewMode('graph');
     }
