@@ -52,7 +52,7 @@ export class AnalysisController {
       const graphData = await this.graphService.convertToGraphData(papers, relations);
 
       // Step 4: Save to database
-      const sessionTitle = title || `Analysis of ${papers.length} papers - ${new Date().toLocaleDateString()}`;
+      // Title will be generated from first paper if not provided
       
       // Convert Paper entities to PaperData format
       const paperData = papers.map(paper => ({
@@ -71,7 +71,7 @@ export class AnalysisController {
 
       const { session, analyses } = await this.analysisSaveService.saveAnalysis(
         userId,
-        sessionTitle,
+        title, // Pass title (or undefined to auto-generate from first paper)
         paperData,
         graphData
       );
@@ -151,11 +151,11 @@ export class AnalysisController {
         }));
       }
 
-      const sessionTitle = title || `Analysis - ${new Date().toLocaleDateString()}`;
+      // Title will be generated from first paper if not provided
 
       const { session, analyses } = await this.analysisSaveService.saveAnalysis(
         userId,
-        sessionTitle,
+        title, // Pass title (or undefined to auto-generate from first paper)
         paperData,
         graphData as GraphData
       );

@@ -1,3 +1,4 @@
+import React from 'react';
 import { BrowserRouter as Router, Routes, Route } from 'react-router-dom';
 import { ThemeProvider, createTheme } from '@mui/material/styles';
 import CssBaseline from '@mui/material/CssBaseline';
@@ -36,17 +37,19 @@ function TestPage() {
 }
 
 function App() {
+  const [sessionHandler, setSessionHandler] = React.useState<((sessionId: string, graphData: any) => void) | undefined>();
+
   return (
     <ThemeProvider theme={theme}>
       <CssBaseline />
       <Router>
         <LoginHandler />
-        <MainLayout>
+        <MainLayout onSelectSession={sessionHandler}>
           <Routes>
             <Route path="/test" element={<TestPage />} />
-            <Route path="/" element={<PaperGraphPage />} />
-            <Route path="/graph" element={<PaperGraphPage />} />
-            <Route path="/new-graph" element={<PaperGraphPage />} />
+            <Route path="/" element={<PaperGraphPage setSessionHandler={setSessionHandler} />} />
+            <Route path="/graph" element={<PaperGraphPage setSessionHandler={setSessionHandler} />} />
+            <Route path="/new-graph" element={<PaperGraphPage setSessionHandler={setSessionHandler} />} />
             <Route path="/enhanced-analysis" element={<EnhancedGraphVisualization />} />
           </Routes>
         </MainLayout>

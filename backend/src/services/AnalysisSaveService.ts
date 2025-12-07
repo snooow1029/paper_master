@@ -79,15 +79,29 @@ export class AnalysisSaveService {
   }
 
   /**
+   * Generate session title from first paper
+   */
+  private generateSessionTitle(papers: PaperData[]): string {
+    if (papers.length > 0 && papers[0].title) {
+      // Use first paper title, truncate if too long
+      const title = papers[0].title;
+      return title.length > 60 ? title.substring(0, 60) + '...' : title;
+    }
+    return `Analysis of ${papers.length} papers - ${new Date().toLocaleDateString()}`;
+  }
+
+  /**
    * Save analysis result to database
    * Creates Session, saves Papers, creates Analysis records, and saves relationships
    */
   async saveAnalysis(
     userId: string,
-    sessionTitle: string,
+    sessionTitle: string | undefined,
     papers: PaperData[],
     graphData: GraphData
   ): Promise<{ session: Session; analyses: Analysis[] }> {
+    // Use provided title or generate from first paper
+    const finalTitle = sessionTitle || this.generateSessionTitle(papers);
     const sessionRepository = AppDataSource.getRepository(Session);
     const analysisRepository = AppDataSource.getRepository(Analysis);
     const paperRelationRepository = AppDataSource.getRepository(PaperRelation);
@@ -95,7 +109,7 @@ export class AnalysisSaveService {
     // 1. Create Session
     const session = sessionRepository.create({
       userId,
-      title: sessionTitle,
+      title: finalTitle,
       description: `Analysis of ${papers.length} papers`,
     });
     const savedSession = await sessionRepository.save(session);
@@ -249,6 +263,97 @@ export class AnalysisSaveService {
     return {
       nodes: Array.from(allNodes.values()),
       edges: Array.from(allEdges.values()),
+    };
+  }
+
+  /**
+   * Update graph data for an existing session
+   */
+  async updateSessionGraph(
+    sessionId: string,
+    userId: string,
+    graphData: GraphData
+  ): Promise<{ session: Session; analyses: Analysis[] }> {
+    const sessionRepository = AppDataSource.getRepository(Session);
+    const analysisRepository = AppDataSource.getRepository(Analysis);
+
+    // Verify session belongs to user
+    const session = await sessionRepository.findOne({
+      where: { id: sessionId, userId },
+      relations: ['analyses', 'analyses.paper'],
+    });
+
+    if (!session) {
+      throw new Error('Session not found');
+    }
+
+    // Get existing papers from session
+    const existingPapers = session.analyses.map(a => a.paper);
+    const paperIdMap = new Map<string, string>();
+    existingPapers.forEach(paper => {
+      paperIdMap.set(paper.id, paper.id);
+    });
+
+    // Update all Analysis records with new graph data
+    const updatedAnalyses: Analysis[] = [];
+
+    for (const paper of existingPapers) {
+      // Find corresponding node in graphData
+      const node = graphData.nodes.find(n => {
+        if (n.url && n.url === paper.url) return true;
+        return n.id === paper.id;
+      });
+
+      // Get edges related to this paper
+      const relatedEdges = graphData.edges.filter(
+        e => e.from === node?.id || e.to === node?.id
+      );
+
+      // Create updated relationship graph
+      const relationshipGraph = {
+        nodes: graphData.nodes.map(n => ({
+          ...n,
+          id: paperIdMap.get(n.id) || n.id,
+          label: n.label || '',
+        })),
+        edges: relatedEdges.map(e => ({
+          ...e,
+          id: e.id,
+          from: paperIdMap.get(e.from) || e.from,
+          to: paperIdMap.get(e.to) || e.to,
+          label: e.label || '',
+        })),
+      };
+
+      // Find or create Analysis record
+      let analysis = await analysisRepository.findOne({
+        where: { sessionId, paperId: paper.id },
+      });
+
+      if (analysis) {
+        // Update existing analysis
+        analysis.relationshipGraph = relationshipGraph;
+      } else {
+        // Create new analysis
+        analysis = analysisRepository.create({
+          sessionId,
+          paperId: paper.id,
+          relationshipGraph,
+        });
+      }
+
+      updatedAnalyses.push(analysis);
+    }
+
+    const savedAnalyses = await analysisRepository.save(updatedAnalyses);
+
+    // Update session timestamp
+    session.updatedAt = new Date();
+    await sessionRepository.save(session);
+
+    return {
+      session,
+      analyses: savedAnalyses,
     };
   }
 }

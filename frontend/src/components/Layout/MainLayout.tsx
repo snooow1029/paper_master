@@ -6,18 +6,20 @@ import HistorySidebar from '../HistorySidebar';
 
 interface MainLayoutProps {
   children: React.ReactNode;
+  onSelectSession?: (sessionId: string, graphData: any) => void;
 }
 
-const MainLayout: React.FC<MainLayoutProps> = ({ children }) => {
+const MainLayout: React.FC<MainLayoutProps> = ({ children, onSelectSession }) => {
   const [sidebarOpen, setSidebarOpen] = useState(false);
   const [, setUser] = useState<any>(null);
 
   const handleSelectSession = (sessionId: string, graphData: any) => {
-    // This will be handled by the parent component
-    // For now, just close the sidebar
     setSidebarOpen(false);
-    // You can emit an event or use a callback here
-    console.log('Selected session:', sessionId, graphData);
+    if (onSelectSession) {
+      onSelectSession(sessionId, graphData);
+    } else {
+      console.log('Selected session:', sessionId, graphData);
+    }
   };
 
   return (

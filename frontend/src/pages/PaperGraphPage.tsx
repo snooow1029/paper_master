@@ -42,11 +42,16 @@ interface Citation {
 
 
 
-const PaperGraphPage: React.FC = () => {
+interface PaperGraphPageProps {
+  setSessionHandler?: (handler: (sessionId: string, graphData: any) => void) => void;
+}
+
+const PaperGraphPage: React.FC<PaperGraphPageProps> = ({ setSessionHandler }) => {
   // Core state
   const [graphData, setGraphData] = useState<GraphData | null>(null);
   const [isLoading, setIsLoading] = useState(false);
   const [_error, setError] = useState<string | null>(null);
+  const [currentSessionId, setCurrentSessionId] = useState<string | null>(null);
   
   // Progress state
   const [progress, setProgress] = useState(0);
@@ -59,6 +64,7 @@ const PaperGraphPage: React.FC = () => {
   
   // SSE connection ref
   const eventSourceRef = useRef<EventSource | null>(null);
+  const saveTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   
   // 保存用户输入的原始论文 URLs（用于 Prior/Derivative Works）
   const [_originalPaperUrls, setOriginalPaperUrls] = useState<string[]>([]);
@@ -415,12 +421,76 @@ const PaperGraphPage: React.FC = () => {
       if (saveResponse.ok) {
         const saveResult = await saveResponse.json();
         console.log('✅ Analysis saved to session:', saveResult.session.id);
+        setCurrentSessionId(saveResult.session.id);
       } else {
         console.warn('Failed to save analysis:', await saveResponse.text());
       }
     } catch (error) {
       console.error('Error saving analysis:', error);
       // Don't throw, just log - saving is optional
+    }
+  };
+
+  // Update current session with edited graph data
+  const updateCurrentSession = async () => {
+    if (!isAuthenticated() || !currentSessionId || !graphData) {
+      console.log('Cannot update: not authenticated or no session');
+      return;
+    }
+
+    try {
+      const token = localStorage.getItem('authToken');
+      if (!token) return;
+
+      const updateResponse = await fetch(`${API_BASE_URL}/api/sessions/${currentSessionId}/update-graph`, {
+        method: 'PUT',
+        headers: {
+          'Authorization': `Bearer ${token}`,
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({
+          graphData: graphData,
+        }),
+      });
+
+      if (updateResponse.ok) {
+        console.log('✅ Session graph updated');
+      } else {
+        console.warn('Failed to update session:', await updateResponse.text());
+      }
+    } catch (error) {
+      console.error('Error updating session:', error);
+    }
+  };
+
+  // Handle session selection from HistorySidebar
+  const handleSessionSelect = (sessionId: string, graphData: any) => {
+    setCurrentSessionId(sessionId);
+    setGraphData(graphData);
+    console.log('✅ Loaded session:', sessionId);
+  };
+
+  // Register session handler with parent component
+  useEffect(() => {
+    if (setSessionHandler) {
+      setSessionHandler(handleSessionSelect);
+    }
+  }, [setSessionHandler]);
+
+  // Handle graph data updates from GraphVisualization
+  const handleGraphDataUpdate = (updatedData: GraphData) => {
+    setGraphData(updatedData);
+    // Auto-save if there's a current session
+    if (currentSessionId) {
+      // Clear existing timeout
+      if (saveTimeoutRef.current) {
+        clearTimeout(saveTimeoutRef.current);
+      }
+      // Debounce: wait 2 seconds after last edit before saving
+      saveTimeoutRef.current = setTimeout(() => {
+        updateCurrentSession();
+        saveTimeoutRef.current = null;
+      }, 2000);
     }
   };
 
@@ -1484,7 +1554,7 @@ const PaperGraphPage: React.FC = () => {
                 <div style={{ flex: 1, position: 'relative', width: '100%', height: '100%' }}>
                   <GraphVisualization 
                     data={graphData} 
-                    onDataUpdate={setGraphData}
+                    onDataUpdate={handleGraphDataUpdate}
                     isLoading={isLoading}
                   />
                 </div>

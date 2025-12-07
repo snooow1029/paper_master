@@ -20,6 +20,9 @@ router.get('/:id', sessionController.getSessionById.bind(sessionController));
 // Get session graph data
 router.get('/:id/graph', sessionController.getSessionGraphData.bind(sessionController));
 
+// Update session graph data
+router.put('/:id/update-graph', sessionController.updateSessionGraph.bind(sessionController));
+
 // Update session
 router.put('/:id', sessionController.updateSession.bind(sessionController));
 

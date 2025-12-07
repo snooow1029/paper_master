@@ -1,6 +1,6 @@
 import { Request, Response } from 'express';
 import { SessionService } from '../services/SessionService';
-import { AnalysisSaveService } from '../services/AnalysisSaveService';
+import { AnalysisSaveService, GraphData } from '../services/AnalysisSaveService';
 
 export class SessionController {
   private sessionService: SessionService;
@@ -125,6 +125,43 @@ export class SessionController {
     } catch (error) {
       console.error('Error updating session:', error);
       res.status(500).json({ error: 'Failed to update session' });
+    }
+  }
+
+  /**
+   * Update graph data for a session
+   */
+  async updateSessionGraph(req: Request, res: Response) {
+    try {
+      const userId = (req as any).user?.id;
+      const { id } = req.params;
+      const { graphData } = req.body;
+      
+      if (!userId) {
+        return res.status(401).json({ error: 'Not authenticated' });
+      }
+
+      if (!graphData || !graphData.nodes || !graphData.edges) {
+        return res.status(400).json({ error: 'graphData with nodes and edges is required' });
+      }
+
+      const analysisSaveService = new AnalysisSaveService();
+      const result = await analysisSaveService.updateSessionGraph(id, userId, graphData as GraphData);
+
+      res.json({
+        session: {
+          id: result.session.id,
+          title: result.session.title,
+          updatedAt: result.session.updatedAt,
+        },
+        analysesCount: result.analyses.length,
+      });
+    } catch (error) {
+      console.error('Error updating session graph:', error);
+      if (error instanceof Error && error.message === 'Session not found') {
+        return res.status(404).json({ error: 'Session not found' });
+      }
+      res.status(500).json({ error: 'Failed to update session graph' });
     }
   }
 
