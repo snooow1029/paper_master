@@ -59,7 +59,7 @@ function App() {
   // Process pending selection when handler becomes available
   React.useEffect(() => {
     if (sessionHandler && pendingSelectionRef.current) {
-      console.log('✅ App: Processing pending selection');
+      console.log('✅ App: Processing pending selection', pendingSelectionRef.current);
       const { sessionId, graphData } = pendingSelectionRef.current;
       sessionHandler(sessionId, graphData);
       pendingSelectionRef.current = null;

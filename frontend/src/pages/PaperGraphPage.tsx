@@ -47,6 +47,8 @@ interface PaperGraphPageProps {
 }
 
 const PaperGraphPage: React.FC<PaperGraphPageProps> = ({ setSessionHandler }) => {
+  console.log('🎨 PaperGraphPage: Component mounted, setSessionHandler:', !!setSessionHandler);
+  
   // Core state
   const [graphData, setGraphData] = useState<GraphData | null>(null);
   const [isLoading, setIsLoading] = useState(false);
@@ -465,26 +467,41 @@ const PaperGraphPage: React.FC<PaperGraphPageProps> = ({ setSessionHandler }) =>
 
   // Handle session selection from HistorySidebar
   const handleSessionSelect = useCallback((sessionId: string, graphData: any) => {
-    console.log('📥 Received session selection:', sessionId, graphData);
+    console.log('📥 PaperGraphPage: Received session selection:', sessionId, graphData);
+    if (!sessionId) {
+      console.error('❌ PaperGraphPage: sessionId is undefined!');
+      return;
+    }
+    if (!graphData || !graphData.nodes) {
+      console.error('❌ PaperGraphPage: graphData is invalid!', graphData);
+      return;
+    }
     setCurrentSessionId(sessionId);
     setGraphData(graphData);
     // Switch to graph view mode
     setViewMode('graph');
-    console.log('✅ Loaded session:', sessionId);
+    console.log('✅ PaperGraphPage: Loaded session:', sessionId, 'with', graphData.nodes.length, 'nodes');
   }, []);
 
-  // Register session handler with parent component immediately
+  // Register session handler with parent component immediately on mount
   useEffect(() => {
+    console.log('🔍 PaperGraphPage: useEffect triggered, setSessionHandler:', !!setSessionHandler, 'handleSessionSelect:', !!handleSessionSelect);
     if (setSessionHandler) {
-      console.log('📤 Registering session handler');
-      setSessionHandler(handleSessionSelect);
+      console.log('📤 PaperGraphPage: Registering session handler');
+      // Use function form to ensure we get the latest handleSessionSelect
+      setSessionHandler(() => {
+        console.log('📞 PaperGraphPage: Handler function called');
+        return handleSessionSelect;
+      });
       // Return cleanup function to unregister
       return () => {
-        console.log('📤 Unregistering session handler');
+        console.log('📤 PaperGraphPage: Unregistering session handler');
         if (setSessionHandler) {
           setSessionHandler(() => undefined);
         }
       };
+    } else {
+      console.warn('⚠️ PaperGraphPage: setSessionHandler not provided');
     }
   }, [setSessionHandler, handleSessionSelect]);
 
