@@ -1,9 +1,12 @@
-import { Entity, PrimaryGeneratedColumn, Column, CreateDateColumn, UpdateDateColumn } from 'typeorm';
+import { Entity, PrimaryGeneratedColumn, Column, CreateDateColumn, UpdateDateColumn, ManyToMany, JoinTable } from 'typeorm';
 
 @Entity()
 export class Paper {
   @PrimaryGeneratedColumn('uuid')
   id: string;
+
+  @Column({ unique: true })
+  url: string;
 
   @Column()
   title: string;
@@ -16,9 +19,6 @@ export class Paper {
 
   @Column('text', { nullable: true })
   introduction: string;
-
-  @Column()
-  url: string;
 
   @Column({ nullable: true })
   doi: string;
@@ -34,6 +34,18 @@ export class Paper {
 
   @Column('text', { nullable: true })
   fullText: string;
+
+  // Many-to-Many self-referencing relations for citation network
+  @ManyToMany(() => Paper, (paper) => paper.citedBy)
+  @JoinTable({
+    name: 'paper_references',
+    joinColumn: { name: 'paperId', referencedColumnName: 'id' },
+    inverseJoinColumn: { name: 'referenceId', referencedColumnName: 'id' },
+  })
+  references: Paper[]; // Papers that this paper cites
+
+  @ManyToMany(() => Paper, (paper) => paper.references)
+  citedBy: Paper[]; // Papers that cite this paper
 
   @CreateDateColumn()
   createdAt: Date;

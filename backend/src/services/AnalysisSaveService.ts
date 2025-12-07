@@ -106,13 +106,15 @@ export class AnalysisSaveService {
     const analysisRepository = AppDataSource.getRepository(Analysis);
     const paperRelationRepository = AppDataSource.getRepository(PaperRelation);
 
-    // 1. Create Session
+    // 1. Create Session with graphSnapshot (Snapshot Layer)
     const session = sessionRepository.create({
       userId,
       title: finalTitle,
       description: `Analysis of ${papers.length} papers`,
+      graphSnapshot: JSON.stringify(graphData), // Save raw graphData for instant UI restoration
     });
     const savedSession = await sessionRepository.save(session);
+    console.log(`💾 Saved graphSnapshot to Session ${savedSession.id}`);
 
     // 2. Upsert all papers
     const savedPapers: Paper[] = [];
@@ -229,10 +231,70 @@ export class AnalysisSaveService {
       console.warn(`⚠️ No paper relations to save (${graphData.edges.length} edges processed)`);
     }
 
+    // 5. Build Knowledge Graph Layer (Many-to-Many relationships)
+    await this.buildKnowledgeGraph(graphData, savedPapers, paperIdMap);
+    console.log(`✅ Built knowledge graph with ${savedPapers.length} papers`);
+
     return {
       session: savedSession,
       analyses: savedAnalyses,
     };
+  }
+
+  /**
+   * Build Knowledge Graph Layer: Create Many-to-Many relationships between Papers
+   */
+  private async buildKnowledgeGraph(
+    graphData: GraphData,
+    savedPapers: Paper[],
+    paperIdMap: Map<string, string>
+  ): Promise<void> {
+    const paperRepository = AppDataSource.getRepository(Paper);
+
+    // Create a Map for quick lookup: database ID -> Paper entity
+    const paperMap = new Map<string, Paper>();
+    savedPapers.forEach(paper => {
+      paperMap.set(paper.id, paper);
+    });
+
+    // Process edges to build citation relationships
+    for (const edge of graphData.edges) {
+      // Support both 'from/to' and 'source/target' formats
+      const fromId = edge.from || (typeof edge.source === 'string' ? edge.source : (edge.source as any)?.id);
+      const toId = edge.to || (typeof edge.target === 'string' ? edge.target : (edge.target as any)?.id);
+      
+      const sourcePaperId = paperIdMap.get(fromId);
+      const targetPaperId = paperIdMap.get(toId);
+
+      if (sourcePaperId && targetPaperId) {
+        const sourcePaper = paperMap.get(sourcePaperId);
+        const targetPaper = paperMap.get(targetPaperId);
+
+        if (sourcePaper && targetPaper && sourcePaper.id !== targetPaper.id) {
+          // Load sourcePaper with its references relation
+          const paperWithRelations = await paperRepository.findOne({
+            where: { id: sourcePaper.id },
+            relations: ['references'],
+          });
+
+          if (paperWithRelations) {
+            // Check if relationship already exists
+            const alreadyReferences = paperWithRelations.references?.some(
+              ref => ref.id === targetPaper.id
+            );
+
+            if (!alreadyReferences) {
+              // Add targetPaper to sourcePaper's references
+              if (!paperWithRelations.references) {
+                paperWithRelations.references = [];
+              }
+              paperWithRelations.references.push(targetPaper);
+              await paperRepository.save(paperWithRelations);
+            }
+          }
+        }
+      }
+    }
   }
 
   /**
@@ -310,6 +372,11 @@ export class AnalysisSaveService {
     if (!session) {
       throw new Error('Session not found');
     }
+
+    // Update graphSnapshot in Session (Snapshot Layer)
+    session.graphSnapshot = JSON.stringify(graphData);
+    await sessionRepository.save(session);
+    console.log(`💾 Updated graphSnapshot in Session ${sessionId}`);
 
     // Get existing papers from session
     const existingPapers = session.analyses.map(a => a.paper);
@@ -411,6 +478,10 @@ export class AnalysisSaveService {
       await paperRelationRepository.save(relationsToSave);
       console.log(`💾 Saved ${relationsToSave.length} paper relations`);
     }
+
+    // Build Knowledge Graph Layer (Many-to-Many relationships)
+    await this.buildKnowledgeGraph(graphData, existingPapers, paperIdMap);
+    console.log(`✅ Updated knowledge graph`);
 
     // Update session timestamp
     session.updatedAt = new Date();

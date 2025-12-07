@@ -20,6 +20,9 @@ export class Session {
   @Column('text', { nullable: true })
   description: string;
 
+  @Column('text', { nullable: true })
+  graphSnapshot: string; // JSON stringified graphData for instant UI restoration
+
   @OneToMany(() => Analysis, (analysis) => analysis.session, { cascade: true })
   analyses: Analysis[];
 
