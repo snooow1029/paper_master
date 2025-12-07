@@ -81,6 +81,21 @@ router.get(
       console.log('  - Info:', info);
       
       if (err) {
+        // Handle duplicate request error (code already used)
+        // This happens when browser/network sends the same callback request twice
+        // The first request succeeds, the second fails with invalid_grant
+        if (err.code === 'invalid_grant' || (err.message && err.message.includes('invalid_grant'))) {
+          console.warn('⚠️  OAuth code already used (duplicate request detected)');
+          console.warn('⚠️  This usually means the first request succeeded and user was already authenticated');
+          console.warn('⚠️  Redirecting to frontend home page...');
+          
+          // Redirect to frontend home page - assume first request succeeded
+          // User should already have token in URL from first successful redirect
+          const frontendUrl = process.env.FRONTEND_URL || 'https://paper-master.vercel.app';
+          return res.redirect(`${frontendUrl}/`);
+        }
+        
+        // Other OAuth errors - redirect with error message
         console.error('❌ OAuth authentication error:', err);
         const frontendUrl = process.env.FRONTEND_URL || 'https://paper-master.vercel.app';
         return res.redirect(`${frontendUrl}/?error=oauth_error&message=${encodeURIComponent(err.message || 'Authentication failed')}&code=${err.code || 'unknown'}`);
@@ -92,7 +107,8 @@ router.get(
         return res.redirect(`${frontendUrl}/?error=oauth_error&message=Authentication failed`);
       }
       
-      // Attach user to request and continue to callback handler
+      // Success - attach user to request and continue to callback handler
+      console.log('✅ OAuth authentication successful, generating token...');
       (req as any).user = user;
       authController.googleCallback(req, res);
     })(req, res, next);

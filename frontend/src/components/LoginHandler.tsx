@@ -14,7 +14,8 @@ export default function LoginHandler() {
   const [message, setMessage] = useState('');
 
   useEffect(() => {
-    if (token) {
+    // Only process token once - prevent duplicate processing in StrictMode
+    if (token && status === 'idle') {
       setStatus('processing');
       setMessage('Verifying login...');
 
@@ -53,7 +54,7 @@ export default function LoginHandler() {
           }, 3000);
         });
     }
-  }, [token, searchParams, setSearchParams]);
+  }, [token, searchParams, setSearchParams, status]);
 
   // Show status message (optional)
   if (status !== 'idle' && message) {
