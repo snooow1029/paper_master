@@ -134,19 +134,60 @@ export class AdvancedCitationService {
       const response = await axios.get(pdfUrl, {
         responseType: 'arraybuffer',
         timeout: 30000,
+        maxRedirects: 5,
         headers: {
-          'User-Agent': 'Mozilla/5.0 (compatible; Paper Master Bot 1.0)'
-        }
+          'User-Agent': 'Mozilla/5.0 (compatible; Paper Master Bot 1.0)',
+          'Accept': 'application/pdf'
+        },
+        validateStatus: (status) => status >= 200 && status < 400
       });
 
+      // Check response headers
+      const contentType = response.headers['content-type'] || '';
+      console.log(`Response Content-Type: ${contentType}`);
+      console.log(`Response status: ${response.status}`);
+      
       const pdfBuffer = Buffer.from(response.data);
       console.log(`PDF download SUCCESS: ${pdfBuffer.length} bytes`);
       
+      // Validate PDF content
+      if (pdfBuffer.length < 100) {
+        console.error(`PDF file too small (${pdfBuffer.length} bytes), likely not a valid PDF`);
+        const contentPreview = pdfBuffer.toString('utf-8', 0, Math.min(200, pdfBuffer.length));
+        console.error(`Content preview: ${contentPreview}`);
+        console.error(`Content-Type was: ${contentType}`);
+        return null;
+      }
+      
+      // Check PDF magic number (%PDF)
+      const pdfHeader = pdfBuffer.toString('utf-8', 0, 4);
+      if (pdfHeader !== '%PDF') {
+        console.error(`Invalid PDF header: Expected "%PDF", got "${pdfHeader}"`);
+        const contentPreview = pdfBuffer.toString('utf-8', 0, Math.min(500, pdfBuffer.length));
+        console.error(`Content preview: ${contentPreview}`);
+        console.error(`Content-Type was: ${contentType}`);
+        console.error(`This might be an HTML error page instead of a PDF`);
+        return null;
+      }
+      
+      console.log(`PDF validation SUCCESS: Valid PDF file (${pdfBuffer.length} bytes)`);
       return pdfBuffer;
       
     } catch (error) {
       const errorMessage = error instanceof Error ? error.message : 'Unknown error';
       console.error('PDF download FAILED:', errorMessage);
+      
+      // Log detailed error information
+      if (error && typeof error === 'object' && 'response' in error) {
+        const axiosError = error as any;
+        console.error('Response status:', axiosError.response?.status);
+        console.error('Response headers:', axiosError.response?.headers);
+        if (axiosError.response?.data) {
+          const errorData = Buffer.from(axiosError.response.data).toString('utf-8', 0, 500);
+          console.error('Response data preview:', errorData);
+        }
+      }
+      
       return null;
     }
   }

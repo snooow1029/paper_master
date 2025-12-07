@@ -190,10 +190,22 @@ export class AnalysisSaveService {
         return mappedId === savedPaper.id;
       });
 
+      if (!node) {
+        console.warn(`⚠️ Could not find node for paper ${savedPaper.id} (${savedPaper.title})`);
+        continue;
+      }
+
       // Get edges related to this paper
-      const relatedEdges = graphData.edges.filter(
-        e => e.from === node?.id || e.to === node?.id
-      );
+      // Support both 'from/to' and 'source/target' formats
+      const nodeId = node.id;
+      const relatedEdges = graphData.edges.filter(e => {
+        const edgeAny = e as any;
+        const fromId = edgeAny.from || (typeof e.source === 'string' ? e.source : (e.source as any)?.id);
+        const toId = edgeAny.to || (typeof e.target === 'string' ? e.target : (e.target as any)?.id);
+        return fromId === nodeId || toId === nodeId;
+      });
+      
+      console.log(`📊 Paper ${savedPaper.id}: Found ${relatedEdges.length} related edges out of ${graphData.edges.length} total edges`);
 
       // Create relationship graph for this paper
       const relationshipGraph = {
@@ -206,13 +218,19 @@ export class AnalysisSaveService {
           };
         }),
         edges: relatedEdges.map(e => {
-          const mappedFrom = paperIdMap.get(e.from) || e.from;
-          const mappedTo = paperIdMap.get(e.to) || e.to;
+          // Support both 'from/to' and 'source/target' formats
+          const edgeAny = e as any;
+          const fromId = edgeAny.from || (typeof e.source === 'string' ? e.source : (e.source as any)?.id);
+          const toId = edgeAny.to || (typeof e.target === 'string' ? e.target : (e.target as any)?.id);
+          const mappedFrom = paperIdMap.get(fromId) || fromId;
+          const mappedTo = paperIdMap.get(toId) || toId;
           return {
             ...e,
-            id: e.id,
+            id: e.id || `edge-${mappedFrom}-${mappedTo}`,
             from: mappedFrom,
             to: mappedTo,
+            source: mappedFrom, // Also include source/target for compatibility
+            target: mappedTo,
             label: e.label || e.relationship || '',
             // 明確保留 LLM 分析的關係信息
             relationship: e.relationship,
@@ -374,10 +392,13 @@ export class AnalysisSaveService {
     const allNodes = new Map<string, any>();
     const allEdges = new Map<string, any>();
 
+    console.log(`📊 Merging ${session.analyses.length} analyses for session ${sessionId}`);
+    
     for (const analysis of session.analyses) {
       if (analysis.relationshipGraph) {
         // Add nodes
         if (analysis.relationshipGraph.nodes) {
+          console.log(`  Analysis ${analysis.id}: ${analysis.relationshipGraph.nodes.length} nodes`);
           for (const node of analysis.relationshipGraph.nodes) {
             if (!allNodes.has(node.id)) {
               allNodes.set(node.id, node);
@@ -387,14 +408,34 @@ export class AnalysisSaveService {
 
         // Add edges
         if (analysis.relationshipGraph.edges) {
+          console.log(`  Analysis ${analysis.id}: ${analysis.relationshipGraph.edges.length} edges`);
           for (const edge of analysis.relationshipGraph.edges) {
-            if (!allEdges.has(edge.id)) {
-              allEdges.set(edge.id, edge);
+            // Ensure edge has an ID for deduplication
+            const edgeAny = edge as any;
+            const edgeId = edgeAny.id || `edge-${edgeAny.from || edgeAny.source}-${edgeAny.to || edgeAny.target}`;
+            if (!allEdges.has(edgeId)) {
+              allEdges.set(edgeId, {
+                ...edge,
+                id: edgeId,
+                // Ensure both from/to and source/target formats exist
+                from: edgeAny.from || edgeAny.source,
+                to: edgeAny.to || edgeAny.target,
+                source: edgeAny.source || edgeAny.from,
+                target: edgeAny.target || edgeAny.to,
+              });
+            } else {
+              console.log(`    Skipping duplicate edge: ${edgeId}`);
             }
           }
+        } else {
+          console.log(`  Analysis ${analysis.id}: No edges in relationshipGraph`);
         }
+      } else {
+        console.log(`  Analysis ${analysis.id}: No relationshipGraph`);
       }
     }
+    
+    console.log(`📊 Merged result: ${allNodes.size} unique nodes, ${allEdges.size} unique edges`);
 
     const result = {
       nodes: Array.from(allNodes.values()),
