@@ -99,6 +99,9 @@ export class AnalysisSaveService {
       ...node,
       id: String(node.id || node.url || `node-${Math.random()}`),
       label: String(node.label || node.title || ''),
+      // Ensure arrays are initialized (not undefined)
+      authors: Array.isArray(node.authors) ? node.authors : [],
+      tags: Array.isArray(node.tags) ? node.tags : [],
     }));
 
     const normalizedEdges = (graphData.edges || []).map((edge, index) => {
