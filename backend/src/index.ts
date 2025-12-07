@@ -14,7 +14,9 @@ import { logStartupInfo, debugEnvironment } from './debug';
 
 import express from 'express';
 import cors from 'cors';
+import session from 'express-session';
 import { AppDataSource } from './config/database';
+import passport from './config/passport';
 import paperRoutes from './routes/paperRoutes';
 import testRoutes from './routes/testRoutes';
 import grobidTestRoutes from './routes/grobidTestRoutes';
@@ -23,6 +25,9 @@ import enhancedGraphRoutes from './routes/enhancedGraphRoutes';
 import referenceGraphRoutes from './routes/referenceGraphRoutes';
 import taskQueueRoutes from './routes/taskQueueRoutes';
 import citationRoutes from './routes/citationRoutes';
+import authRoutes from './routes/authRoutes';
+import sessionRoutes from './routes/sessionRoutes';
+import analysisRoutes from './routes/analysisRoutes';
 import { errorHandler } from './middleware/errorHandler';
 
 const app = express();
@@ -48,9 +53,32 @@ console.log(`Database URL: ${process.env.DATABASE_URL ? 'Set' : 'Not set'}`);
 console.log('='.repeat(60));
 
 // Middleware
-app.use(cors());
+app.use(cors({
+  origin: process.env.FRONTEND_URL || 'http://localhost:3000',
+  credentials: true,
+}));
 app.use(express.json({ limit: '50mb' }));
 app.use(express.urlencoded({ limit: '50mb', extended: true }));
+
+// Session configuration for OAuth
+app.use(
+  session({
+    secret: process.env.SESSION_SECRET || 'your-secret-key-change-in-production',
+    resave: false,
+    saveUninitialized: false,
+    cookie: {
+      secure: process.env.NODE_ENV === 'production', // HTTPS only in production
+      httpOnly: true,
+      maxAge: 24 * 60 * 60 * 1000, // 24 hours
+      sameSite: process.env.NODE_ENV === 'production' ? 'none' : 'lax', // Allow cross-site cookies in production
+    },
+    name: 'paper_master_session', // Custom session name
+  })
+);
+
+// Initialize Passport
+app.use(passport.initialize());
+app.use(passport.session());
 
 // Routes
 app.use('/api/papers', paperRoutes);
@@ -61,6 +89,9 @@ app.use('/api/enhanced-graph', enhancedGraphRoutes);
 app.use('/api/reference-graph', referenceGraphRoutes);
 app.use('/api/tasks', taskQueueRoutes);
 app.use('/api/citations', citationRoutes);
+app.use('/api/auth', authRoutes);
+app.use('/api/sessions', sessionRoutes);
+app.use('/api/analyses', analysisRoutes);
 
 // Health check - 必須在數據庫初始化之前可用
 app.get('/api/health', async (req, res) => {

@@ -1,6 +1,9 @@
 import { DataSource, DataSourceOptions } from 'typeorm';
 import { Paper } from '../entities/Paper';
 import { PaperRelation } from '../entities/PaperRelation';
+import { User } from '../entities/User';
+import { Session } from '../entities/Session';
+import { Analysis } from '../entities/Analysis';
 
 const databaseUrl = process.env.DATABASE_URL;
 const usePostgres = Boolean(databaseUrl);
@@ -8,7 +11,7 @@ const usePostgres = Boolean(databaseUrl);
 const commonOptions = {
   synchronize: true,
   logging: false,
-  entities: [Paper, PaperRelation],
+  entities: [Paper, PaperRelation, User, Session, Analysis],
   migrations: [],
   subscribers: [],
 };

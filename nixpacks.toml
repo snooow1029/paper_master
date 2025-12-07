@@ -8,6 +8,7 @@ nixPkgs = ["nodejs-20_x"]
 cmds = [
   "cd backend && npm install --include=dev",
   "cd backend && npm list pg || npm install pg@^8.16.3 --save",
+  "cd backend && npm list passport || npm install passport@^0.7.0 passport-google-oauth20@^2.0.0 express-session@^1.17.3 --save",
   "cd backend && node -e \"require('pg')\" || (echo 'pg not found, installing...' && npm install pg@^8.16.3 --save)"
 ]
 

@@ -17,6 +17,10 @@ dist/
 build/
 *.tsbuildinfo
 
+# Vite cache
+.vite/
+frontend/.vite/
+
 # Logs
 logs/
 *.log
@@ -70,6 +74,7 @@ Thumbs.db
 
 # GROBID (third-party tool)
 grobid-*/
+*.zip
 
 # Obsidian sync
 backend/obsidian_sync/
@@ -89,3 +94,5 @@ test_performance.py
 # Backup files
 *.bak
 *.backup
+
+*.md
