@@ -5,6 +5,7 @@ import { Box, Typography } from '@mui/material';
 import MainLayout from './components/Layout/MainLayout';
 import PaperGraphPage from './pages/PaperGraphPage';
 import EnhancedGraphVisualization from './components/EnhancedGraphVisualization';
+import LoginHandler from './components/LoginHandler';
 
 const theme = createTheme({
   palette: {
@@ -39,6 +40,7 @@ function App() {
     <ThemeProvider theme={theme}>
       <CssBaseline />
       <Router>
+        <LoginHandler />
         <MainLayout>
           <Routes>
             <Route path="/test" element={<TestPage />} />
