@@ -180,6 +180,7 @@ export class AnalysisSaveService {
 
     // 4. Save paper relationships (PaperRelation)
     const relationsToSave: PaperRelation[] = [];
+    console.log(`💾 Saving ${graphData.edges.length} edges as PaperRelation`);
     for (const edge of graphData.edges) {
       const fromPaperId = paperIdMap.get(edge.from);
       const toPaperId = paperIdMap.get(edge.to);
@@ -208,12 +209,19 @@ export class AnalysisSaveService {
             });
             relationsToSave.push(relation);
           }
+        } else {
+          console.warn(`⚠️ Could not find papers for edge: ${edge.from} -> ${edge.to}`);
         }
+      } else {
+        console.warn(`⚠️ Could not map edge IDs: ${edge.from} -> ${edge.to}`);
       }
     }
 
     if (relationsToSave.length > 0) {
       await paperRelationRepository.save(relationsToSave);
+      console.log(`✅ Saved ${relationsToSave.length} paper relations`);
+    } else {
+      console.warn(`⚠️ No paper relations to save (${graphData.edges.length} edges processed)`);
     }
 
     return {
@@ -286,6 +294,7 @@ export class AnalysisSaveService {
   ): Promise<{ session: Session; analyses: Analysis[] }> {
     const sessionRepository = AppDataSource.getRepository(Session);
     const analysisRepository = AppDataSource.getRepository(Analysis);
+    const paperRelationRepository = AppDataSource.getRepository(PaperRelation);
 
     // Verify session belongs to user
     const session = await sessionRepository.findOne({
@@ -348,6 +357,44 @@ export class AnalysisSaveService {
     }
 
     const savedAnalyses = await analysisRepository.save(updatedAnalyses);
+
+    // Update PaperRelation records
+    // First, delete existing relations for papers in this session
+    const paperIds = existingPapers.map(p => p.id);
+    await paperRelationRepository
+      .createQueryBuilder()
+      .delete()
+      .where('fromPaperId IN (:...paperIds) OR toPaperId IN (:...paperIds)', { paperIds })
+      .execute();
+
+    // Then, create new relations from graphData edges
+    const relationsToSave: PaperRelation[] = [];
+    for (const edge of graphData.edges) {
+      const fromPaperId = paperIdMap.get(edge.from);
+      const toPaperId = paperIdMap.get(edge.to);
+
+      if (fromPaperId && toPaperId) {
+        const fromPaper = existingPapers.find(p => p.id === fromPaperId);
+        const toPaper = existingPapers.find(p => p.id === toPaperId);
+
+        if (fromPaper && toPaper) {
+          const relation = paperRelationRepository.create({
+            fromPaper,
+            toPaper,
+            relationship: edge.label || 'related',
+            description: edge.label || '',
+            confidence: 1.0,
+            weight: 1,
+          });
+          relationsToSave.push(relation);
+        }
+      }
+    }
+
+    if (relationsToSave.length > 0) {
+      await paperRelationRepository.save(relationsToSave);
+      console.log(`💾 Saved ${relationsToSave.length} paper relations`);
+    }
 
     // Update session timestamp
     session.updatedAt = new Date();
