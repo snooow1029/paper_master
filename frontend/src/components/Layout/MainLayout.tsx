@@ -1,11 +1,25 @@
-import React from 'react';
-import { AppBar, Toolbar, Typography, Box } from '@mui/material';
+import React, { useState } from 'react';
+import { AppBar, Toolbar, Typography, Box, IconButton } from '@mui/material';
+import { Menu as MenuIcon } from '@mui/icons-material';
+import LoginButton from '../LoginButton';
+import HistorySidebar from '../HistorySidebar';
 
 interface MainLayoutProps {
   children: React.ReactNode;
 }
 
 const MainLayout: React.FC<MainLayoutProps> = ({ children }) => {
+  const [sidebarOpen, setSidebarOpen] = useState(false);
+  const [, setUser] = useState<any>(null);
+
+  const handleSelectSession = (sessionId: string, graphData: any) => {
+    // This will be handled by the parent component
+    // For now, just close the sidebar
+    setSidebarOpen(false);
+    // You can emit an event or use a callback here
+    console.log('Selected session:', sessionId, graphData);
+  };
+
   return (
     <Box sx={{ 
       flexGrow: 1,
@@ -23,6 +37,16 @@ const MainLayout: React.FC<MainLayoutProps> = ({ children }) => {
         }}
       >
         <Toolbar>
+          <IconButton
+            edge="start"
+            color="inherit"
+            aria-label="menu"
+            onClick={() => setSidebarOpen(true)}
+            sx={{ mr: 2 }}
+          >
+            <MenuIcon />
+          </IconButton>
+          
           <Typography 
             variant="h6" 
             component="div" 
@@ -37,17 +61,7 @@ const MainLayout: React.FC<MainLayoutProps> = ({ children }) => {
             Paper Master - Intelligent Paper Analysis System
           </Typography>
           
-          <Typography 
-            variant="body2" 
-            sx={{ 
-              color: '#b8b8b8',
-              fontFamily: '-apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif',
-              marginLeft: 2,
-              fontSize: '0.85rem'
-            }}
-          >
-             Citation Network Analysis |  Intelligent Section Filtering |  Relationship Graph Construction
-          </Typography>
+          <LoginButton onLogin={setUser} />
         </Toolbar>
       </AppBar>
       <Box 
@@ -60,6 +74,12 @@ const MainLayout: React.FC<MainLayoutProps> = ({ children }) => {
       >
         {children}
       </Box>
+      
+      <HistorySidebar
+        open={sidebarOpen}
+        onClose={() => setSidebarOpen(false)}
+        onSelectSession={handleSelectSession}
+      />
     </Box>
   );
 };
