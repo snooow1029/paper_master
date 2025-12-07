@@ -20,6 +20,9 @@ export class PaperRelation {
   @Column('text')
   description: string;
 
+  @Column('text', { nullable: true })
+  evidence: string; // LLM 分析的關係證據
+
   @Column('float', { default: 1.0 })
   confidence: number;
 

@@ -213,7 +213,12 @@ export class AnalysisSaveService {
             id: e.id,
             from: mappedFrom,
             to: mappedTo,
-            label: e.label,
+            label: e.label || e.relationship || '',
+            // 明確保留 LLM 分析的關係信息
+            relationship: e.relationship,
+            strength: e.strength,
+            evidence: e.evidence,
+            description: e.description,
           };
         }),
       };
@@ -259,8 +264,9 @@ export class AnalysisSaveService {
               toPaper,
               relationship: edge.label || edge.relationship || 'related',
               description: edge.description || edge.label || edge.relationship || '',
-              confidence: 1.0,
-              weight: 1,
+              evidence: edge.evidence || '', // 保存 LLM 分析的證據
+              confidence: edge.strength !== undefined ? edge.strength : 1.0, // 使用 LLM 分析的強度作為置信度
+              weight: edge.weight || 1,
             });
             relationsToSave.push(relation);
           }
@@ -454,6 +460,11 @@ export class AnalysisSaveService {
           from: mappedFrom,
           to: mappedTo,
           label: e.label || e.relationship || '',
+          // 明確保留 LLM 分析的關係信息
+          relationship: e.relationship,
+          strength: e.strength,
+          evidence: e.evidence,
+          description: e.description,
         };
       }),
     };
@@ -515,8 +526,9 @@ export class AnalysisSaveService {
             toPaper,
             relationship: edge.label || edge.relationship || 'related',
             description: edge.description || edge.label || edge.relationship || '',
-            confidence: 1.0,
-            weight: 1,
+            evidence: edge.evidence || '', // 保存 LLM 分析的證據
+            confidence: edge.strength !== undefined ? edge.strength : 1.0, // 使用 LLM 分析的強度作為置信度
+            weight: edge.weight || 1,
           });
           relationsToSave.push(relation);
         }

@@ -21,7 +21,9 @@ interface GraphEdge {
   to: string;
   label: string;
   description: string;
+  evidence?: string; // LLM 分析的關係證據
   weight: number;
+  confidence?: number; // 關係置信度（來自 LLM 分析的強度）
 }
 
 interface GraphData {
@@ -282,7 +284,9 @@ If no significant relationship exists, set hasRelationship to false.
       to: relation.toPaper.id,
       label: relation.relationship,
       description: relation.description,
+      evidence: relation.evidence || '', // 包含 LLM 分析的證據
       weight: relation.weight,
+      confidence: relation.confidence,
     }));
 
     return { nodes, edges };
