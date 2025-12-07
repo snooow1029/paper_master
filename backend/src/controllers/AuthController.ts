@@ -21,10 +21,24 @@ export class AuthController {
       // User is attached to req.user by passport middleware
       const user = (req as any).user;
       
+      console.log('🔐 AuthController.googleCallback called');
+      console.log('🔐 User:', user ? { id: user.id, email: user.email } : null);
+      
       if (!user) {
-        // Redirect to frontend with error
-        const frontendUrl = process.env.FRONTEND_URL || 'http://localhost:3000';
-        return res.redirect(`${frontendUrl}/login?error=authentication_failed`);
+        console.error('❌ No user found in request');
+        // Ensure FRONTEND_URL has no trailing slash
+        const baseUrl = (process.env.FRONTEND_URL || 'https://paper-master.vercel.app').replace(/\/$/, '');
+        const redirectUrl = `${baseUrl}/?error=authentication_failed`;
+        
+        console.log('🚀 Redirecting to (no user):', redirectUrl);
+        console.log('🚀 FRONTEND_URL from env:', process.env.FRONTEND_URL);
+        
+        if (!redirectUrl || redirectUrl.includes('undefined')) {
+          console.error('❌ Redirect URL is invalid!');
+          return res.status(500).send('Server Configuration Error: Invalid Redirect URL');
+        }
+        
+        return res.redirect(redirectUrl);
       }
 
       // Generate JWT token
@@ -33,24 +47,60 @@ export class AuthController {
         email: user.email,
       });
 
-      // Redirect to frontend with token
-      const frontendUrl = process.env.FRONTEND_URL || 'http://localhost:3000';
+      console.log('🔐 Token generated:', token ? `${token.substring(0, 20)}...` : 'null');
+      console.log('🔐 Token type:', typeof token);
+      console.log('🔐 Token length:', token ? token.length : 0);
+
+      // Ensure FRONTEND_URL has no trailing slash
+      const baseUrl = (process.env.FRONTEND_URL || 'https://paper-master.vercel.app').replace(/\/$/, '');
       
-      // Option 1: Redirect to home page with token in query (simplest, works immediately)
-      // Token will be in URL, frontend should extract and store it
-      const redirectUrl = `${frontendUrl}/?token=${encodeURIComponent(token)}`;
+      // Redirect to frontend with token in query parameter
+      const redirectUrl = `${baseUrl}/?token=${encodeURIComponent(token)}`;
       
-      // Option 2: Redirect to home page with token in hash (more secure, doesn't appear in server logs)
-      // const redirectUrl = `${frontendUrl}/#/login-success?token=${encodeURIComponent(token)}`;
+      console.log('🚀 Attempting to redirect to:', redirectUrl);
+      console.log('🚀 FRONTEND_URL from env:', process.env.FRONTEND_URL);
+      console.log('🚀 Base URL (after cleanup):', baseUrl);
+      console.log('🚀 Full redirect URL:', redirectUrl);
       
-      // Option 3: Redirect to a specific success page (requires frontend route)
-      // const redirectUrl = `${frontendUrl}/login/success?token=${encodeURIComponent(token)}`;
+      // Validate redirect URL
+      if (!redirectUrl || redirectUrl.includes('undefined')) {
+        console.error('❌ Redirect URL is invalid!');
+        console.error('❌ Redirect URL contains undefined');
+        console.error('❌ FRONTEND_URL:', process.env.FRONTEND_URL);
+        return res.status(500).send('Server Configuration Error: Invalid Redirect URL');
+      }
       
+      // Check for common issues
+      if (redirectUrl.includes('[object Object]')) {
+        console.error('❌ Token is an object instead of string!');
+        return res.status(500).send('Server Error: Token generation failed');
+      }
+      
+      if (redirectUrl.trim() !== redirectUrl) {
+        console.warn('⚠️  Redirect URL has leading/trailing whitespace!');
+        console.warn('⚠️  Original:', JSON.stringify(redirectUrl));
+        console.warn('⚠️  Trimmed:', JSON.stringify(redirectUrl.trim()));
+      }
+      
+      console.log('✅ Redirect URL is valid, redirecting...');
       res.redirect(redirectUrl);
     } catch (error) {
-      console.error('Error in Google OAuth callback:', error);
-      const frontendUrl = process.env.FRONTEND_URL || 'http://localhost:3000';
-      res.redirect(`${frontendUrl}/login?error=server_error`);
+      console.error('❌ Error in Google OAuth callback:', error);
+      console.error('❌ Error stack:', error instanceof Error ? error.stack : 'No stack trace');
+      
+      // Ensure FRONTEND_URL has no trailing slash
+      const baseUrl = (process.env.FRONTEND_URL || 'https://paper-master.vercel.app').replace(/\/$/, '');
+      const redirectUrl = `${baseUrl}/?error=server_error`;
+      
+      console.log('🚀 Redirecting to (error):', redirectUrl);
+      console.log('🚀 FRONTEND_URL from env:', process.env.FRONTEND_URL);
+      
+      if (!redirectUrl || redirectUrl.includes('undefined')) {
+        console.error('❌ Error redirect URL is invalid!');
+        return res.status(500).send('Server Configuration Error: Invalid Redirect URL');
+      }
+      
+      res.redirect(redirectUrl);
     }
   }
 

@@ -113,14 +113,41 @@ router.get(
           console.warn('⚠️  OAuth code already used (this should be rare with duplicate prevention middleware)');
           console.warn('⚠️  Redirecting to frontend home page...');
           
-          const frontendUrl = process.env.FRONTEND_URL || 'https://paper-master.vercel.app';
-          return res.redirect(`${frontendUrl}/`);
+          // Ensure FRONTEND_URL has no trailing slash
+          const baseUrl = (process.env.FRONTEND_URL || 'https://paper-master.vercel.app').replace(/\/$/, '');
+          const redirectUrl = `${baseUrl}/`;
+          
+          console.log('🚀 Redirecting to (invalid_grant):', redirectUrl);
+          console.log('🚀 FRONTEND_URL from env:', process.env.FRONTEND_URL);
+          
+          if (!redirectUrl || redirectUrl.includes('undefined')) {
+            console.error('❌ Redirect URL is invalid!');
+            return res.status(500).send('Server Configuration Error: Invalid Redirect URL');
+          }
+          
+          return res.redirect(redirectUrl);
         }
         
         // Other OAuth errors - redirect with error message
         console.error('❌ OAuth authentication error:', err);
-        const frontendUrl = process.env.FRONTEND_URL || 'https://paper-master.vercel.app';
-        return res.redirect(`${frontendUrl}/?error=oauth_error&message=${encodeURIComponent(err.message || 'Authentication failed')}&code=${err.code || 'unknown'}`);
+        
+        // Ensure FRONTEND_URL has no trailing slash
+        const baseUrl = (process.env.FRONTEND_URL || 'https://paper-master.vercel.app').replace(/\/$/, '');
+        const errorMessage = encodeURIComponent(err.message || 'Authentication failed');
+        const errorCode = err.code || 'unknown';
+        const redirectUrl = `${baseUrl}/?error=oauth_error&message=${errorMessage}&code=${errorCode}`;
+        
+        console.log('🚀 Redirecting to (OAuth error):', redirectUrl);
+        console.log('🚀 FRONTEND_URL from env:', process.env.FRONTEND_URL);
+        console.log('🚀 Error message:', err.message);
+        console.log('🚀 Error code:', err.code);
+        
+        if (!redirectUrl || redirectUrl.includes('undefined')) {
+          console.error('❌ Redirect URL is invalid!');
+          return res.status(500).send('Server Configuration Error: Invalid Redirect URL');
+        }
+        
+        return res.redirect(redirectUrl);
       }
       
       if (!user) {
@@ -130,8 +157,20 @@ router.get(
           processedCodes.delete(code);
           console.log(`🗑️  Removed code ${code.substring(0, 10)}... from cache due to no user`);
         }
-        const frontendUrl = process.env.FRONTEND_URL || 'https://paper-master.vercel.app';
-        return res.redirect(`${frontendUrl}/?error=oauth_error&message=Authentication failed`);
+        
+        // Ensure FRONTEND_URL has no trailing slash
+        const baseUrl = (process.env.FRONTEND_URL || 'https://paper-master.vercel.app').replace(/\/$/, '');
+        const redirectUrl = `${baseUrl}/?error=oauth_error&message=${encodeURIComponent('Authentication failed')}`;
+        
+        console.log('🚀 Redirecting to (no user):', redirectUrl);
+        console.log('🚀 FRONTEND_URL from env:', process.env.FRONTEND_URL);
+        
+        if (!redirectUrl || redirectUrl.includes('undefined')) {
+          console.error('❌ Redirect URL is invalid!');
+          return res.status(500).send('Server Configuration Error: Invalid Redirect URL');
+        }
+        
+        return res.redirect(redirectUrl);
       }
       
       // Success - attach user to request and continue to callback handler
