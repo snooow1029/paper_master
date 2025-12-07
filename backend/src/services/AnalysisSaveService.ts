@@ -81,20 +81,38 @@ export class AnalysisSaveService {
   /**
    * Generate session title from source paper (original paper)
    */
-  private generateSessionTitle(papers: PaperData[], originalPaperIds?: string[]): string {
-    // If originalPaperIds is provided, use the first original paper's title
+  private generateSessionTitle(papers: PaperData[], originalPaperIds?: string[], graphData?: GraphData): string {
+    // If originalPaperIds is provided, try to find the first original paper
     if (originalPaperIds && originalPaperIds.length > 0) {
       const firstOriginalId = originalPaperIds[0];
-      const firstOriginalPaper = papers.find(p => p.id === firstOriginalId);
+      console.log(`🔍 Looking for original paper with ID: ${firstOriginalId}`);
+      
+      // Try to find by ID first
+      let firstOriginalPaper = papers.find(p => p.id === firstOriginalId);
+      
+      // If not found by ID, try to find by matching node in graphData
+      if (!firstOriginalPaper && graphData) {
+        const originalNode = graphData.nodes.find(n => n.id === firstOriginalId);
+        if (originalNode && originalNode.url) {
+          // Try to find paper by URL
+          firstOriginalPaper = papers.find(p => p.url === originalNode.url);
+          console.log(`🔍 Found original paper by URL: ${originalNode.url}`);
+        }
+      }
+      
       if (firstOriginalPaper && firstOriginalPaper.title) {
         const title = firstOriginalPaper.title;
+        console.log(`✅ Using original paper title: "${title}"`);
         return title.length > 60 ? title.substring(0, 60) + '...' : title;
+      } else {
+        console.log(`⚠️ Could not find original paper with ID ${firstOriginalId}, falling back to first paper`);
       }
     }
     
     // Fallback: use first paper title
     if (papers.length > 0 && papers[0].title) {
       const title = papers[0].title;
+      console.log(`📝 Using first paper title: "${title}"`);
       return title.length > 60 ? title.substring(0, 60) + '...' : title;
     }
     
@@ -176,9 +194,12 @@ export class AnalysisSaveService {
     // Get originalPapers from graphData if available
     const originalPaperIds = (graphData as any).originalPapers;
     console.log(`📥 Original papers: ${originalPaperIds ? originalPaperIds.length : 0} papers`);
+    if (originalPaperIds && originalPaperIds.length > 0) {
+      console.log(`📥 Original paper IDs:`, originalPaperIds);
+    }
     
     // Use provided title or generate from source paper (original paper)
-    const finalTitle = sessionTitle || this.generateSessionTitle(papers, originalPaperIds);
+    const finalTitle = sessionTitle || this.generateSessionTitle(papers, originalPaperIds, graphData);
     console.log(`📝 Generated session title: "${finalTitle}"`);
     const sessionRepository = AppDataSource.getRepository(Session);
     const analysisRepository = AppDataSource.getRepository(Analysis);
