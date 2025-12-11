@@ -52,7 +52,8 @@ export class AuthController {
       console.log('🔐 Token length:', token ? token.length : 0);
 
       // Ensure FRONTEND_URL has no trailing slash
-      const baseUrl = (process.env.FRONTEND_URL || 'https://paper-master.vercel.app').replace(/\/$/, '');
+      // Default to localhost for development
+      const baseUrl = (process.env.FRONTEND_URL || 'http://localhost:3000').replace(/\/$/, '');
       
       // Redirect to frontend with token in query parameter
       const redirectUrl = `${baseUrl}/?token=${encodeURIComponent(token)}`;
@@ -89,7 +90,8 @@ export class AuthController {
       console.error('❌ Error stack:', error instanceof Error ? error.stack : 'No stack trace');
       
       // Ensure FRONTEND_URL has no trailing slash
-      const baseUrl = (process.env.FRONTEND_URL || 'https://paper-master.vercel.app').replace(/\/$/, '');
+      // Default to localhost for development
+      const baseUrl = (process.env.FRONTEND_URL || 'http://localhost:3000').replace(/\/$/, '');
       const redirectUrl = `${baseUrl}/?error=server_error`;
       
       console.log('🚀 Redirecting to (error):', redirectUrl);

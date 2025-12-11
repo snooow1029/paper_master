@@ -85,20 +85,20 @@ router.post('/build-graph', async (req, res) => {
           const nodeArxivId = node.arxivId || (nodeUrl.match(/arxiv\.org\/(?:abs|pdf)\/([^\/\?]+)/i)?.[1]?.replace(/\.pdf$/, ''));
 
           return {
-            id: node.id,
-            label: node.title, // Add label field using title
-            title: node.title,
-            authors: node.authors,
-            abstract: node.abstract || '', // Use actual abstract from GROBID
-            introduction: '', // Empty for now, can be populated later
+          id: node.id,
+          label: node.title, // Add label field using title
+          title: node.title,
+          authors: node.authors,
+          abstract: node.abstract || '', // Use actual abstract from GROBID
+          introduction: '', // Empty for now, can be populated later
             url: nodeUrl, // 使用保存的 URL 或从映射中获取
-            tags: node.category ? [node.category] : [], // Use category as tag if available
-            year: node.year || 'Unknown',
-            venue: node.venue || '',
-            conference: '',
-            citationCount: node.citationCount || 0,
-            paperCitationCount: node.paperCitationCount || node.citationCount || 0, // Add paperCitationCount
-            doi: '',
+          tags: node.category ? [node.category] : [], // Use category as tag if available
+          year: node.year || 'Unknown',
+          venue: node.venue || '',
+          conference: '',
+            citationCount: node.citationCount ?? null,
+            paperCitationCount: node.paperCitationCount ?? node.citationCount ?? null, // 避免因未获取到而误显示为0
+          doi: '',
             arxivId: nodeArxivId || ''
           };
         }),
@@ -121,38 +121,59 @@ router.post('/build-graph', async (req, res) => {
         }))
       );
 
-      // 为原始论文计算 Prior Works 和 Derivative Works
-      console.log('\n=== Computing Prior & Derivative Works for Original Papers ===');
+      // 使用 PaperCitationService 获取 Prior Works 和 Derivative Works
+      console.log('\n=== Fetching Prior & Derivative Works via PaperCitationService ===');
       const priorWorksMap: Record<string, any[]> = {};
       const derivativeWorksMap: Record<string, any[]> = {};
       
-      // 并行计算所有原始论文的 prior 和 derivative works
-      const worksPromises = urls.map(async (url: string, index: number) => {
-        if (!url || !url.trim()) return;
+      // 并行获取所有论文的 prior 和 derivative works
+      const fetchPromises = urls.map(async (url: string) => {
+        if (!url || !url.trim()) {
+          priorWorksMap[url] = [];
+          derivativeWorksMap[url] = [];
+          return;
+        }
         
         try {
-          const [priorWorks, derivativeWorks] = await Promise.all([
-            citationService.getPriorWorksFromUrl(url).catch(err => {
-              console.error(`Error getting prior works for ${url}:`, err);
-              return [];
-            }),
-            citationService.getDerivativeWorksFromUrl(url).catch(err => {
-              console.error(`Error getting derivative works for ${url}:`, err);
-              return [];
-            })
-          ]);
+          console.log(`🔍 Fetching prior and derivative works for: ${url}`);
           
-          priorWorksMap[url] = priorWorks;
-          derivativeWorksMap[url] = derivativeWorks;
-          console.log(`✅ Paper ${index + 1}: ${priorWorks.length} prior works, ${derivativeWorks.length} derivative works`);
+          // 获取 prior works
+          const priorWorks = await citationService.getPriorWorksFromUrl(url);
+          priorWorksMap[url] = priorWorks.map(work => ({
+            id: work.id || work.url || `prior_${work.title?.toLowerCase().replace(/[^a-z0-9]/g, '_')}`,
+            title: work.title || 'Unknown Title',
+            authors: work.authors || [],
+            year: work.year || 'Unknown',
+            abstract: work.abstract || '',
+            url: work.url || '',
+            citationCount: work.citationCount ?? null, // 使用 null 而不是 0
+            arxivId: work.arxivId || ''
+          }));
+          
+          // 获取 derivative works
+          const derivativeWorks = await citationService.getDerivativeWorksFromUrl(url);
+          derivativeWorksMap[url] = derivativeWorks.map(work => ({
+            id: work.id || work.url || `derivative_${work.title?.toLowerCase().replace(/[^a-z0-9]/g, '_')}`,
+            title: work.title || 'Unknown Title',
+            authors: work.authors || [],
+            year: work.year || 'Unknown',
+            abstract: work.abstract || '',
+            url: work.url || '',
+            citationCount: work.citationCount ?? null, // 使用 null 而不是 0
+            arxivId: work.arxivId || ''
+          }));
+          
+          console.log(`✅ Paper "${url}":`);
+          console.log(`   📚 Prior Works: ${priorWorks.length}`);
+          console.log(`   🔗 Derivative Works: ${derivativeWorks.length}`);
         } catch (error) {
-          console.error(`Error processing works for ${url}:`, error);
+          console.error(`❌ Failed to fetch works for ${url}:`, error);
           priorWorksMap[url] = [];
           derivativeWorksMap[url] = [];
         }
       });
-
-      await Promise.all(worksPromises);
+      
+      await Promise.all(fetchPromises);
 
       res.json({
         success: true,
@@ -267,19 +288,19 @@ router.post('/build-with-filtered-citations', async (req, res) => {
           const nodeArxivId = node.arxivId || (nodeUrl.match(/arxiv\.org\/(?:abs|pdf)\/([^\/\?]+)/i)?.[1]?.replace(/\.pdf$/, ''));
 
           return {
-            id: node.id,
-            label: node.title, // Add label field using title
-            title: node.title,
-            authors: node.authors,
-            abstract: node.abstract || '', // Use actual abstract from GROBID
-            introduction: '', // Empty for now, can be populated later
+          id: node.id,
+          label: node.title, // Add label field using title
+          title: node.title,
+          authors: node.authors,
+          abstract: node.abstract || '', // Use actual abstract from GROBID
+          introduction: '', // Empty for now, can be populated later
             url: nodeUrl, // 使用节点中的 URL
-            tags: node.category ? [node.category] : [], // Use category as tag if available
-            year: node.year || 'Unknown',
-            venue: node.venue || '',
-            conference: '',
-            citationCount: 0,
-            doi: '',
+          tags: node.category ? [node.category] : [], // Use category as tag if available
+          year: node.year || 'Unknown',
+          venue: node.venue || '',
+          conference: '',
+          citationCount: 0,
+          doi: '',
             arxivId: nodeArxivId || ''
           };
         }),

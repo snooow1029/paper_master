@@ -8,6 +8,7 @@ import { AdvancedCitationService } from './AdvancedCitationService';
 import { DeepPaperRelationshipAnalyzer, DeepPaperContext, DeepRelationshipEdge } from './DeepPaperRelationshipAnalyzer';
 import { PaperMetadata } from './PaperRelationshipAnalyzer';
 import { Paper } from '../entities/Paper';
+import { SemanticScholarService } from './SemanticScholarService';
 
 export interface EnhancedPaperGraph {
   nodes: Array<{
@@ -115,6 +116,8 @@ export class EnhancedGraphService extends GraphService {
           year: paper.year,
           abstract: paper.abstract,
           venue: paper.venue,
+          url: paper.url, // 保存 URL
+          arxivId: paper.arxivId, // 保存 arXiv ID
           citationCount: paper.citationCount, // 新增：引用次數
           category: this.inferPaperCategory(paper),
           structuredAnalysis: {
@@ -140,6 +143,12 @@ export class EnhancedGraphService extends GraphService {
         graphMetrics
       };
 
+      // 3.5 獲取並添加 Derivative Works (引用這些論文的後續論文)
+      console.log('\n--- Step 3.5: Fetching Derivative Works ---');
+      // NOTE: 不再将 derivative works 添加到 graph 中，避免太多 nodes
+      // Derivative works 应该只在列表中显示（通过 PaperCitationService 获取）
+      // await this.appendDerivativeWorks(enhancedGraph, deepPaperContexts);
+
       console.log('\n🎉 Enhanced Graph Building Complete!');
       console.log(`   📝 Nodes: ${nodes.length}`);
       console.log(`   🔗 Edges: ${relationships.length}`);
@@ -152,6 +161,18 @@ export class EnhancedGraphService extends GraphService {
       console.error('❌ Enhanced Graph Building Failed:', error);
       throw error;
     }
+  }
+
+  /**
+   * 从 URL 提取 arXiv ID
+   */
+  private extractArxivId(url: string): string | undefined {
+    if (!url) return undefined;
+    const match = url.match(/arxiv\.org\/(?:abs|pdf)\/([^\/\?\s]+)/i);
+    if (match && match[1]) {
+      return match[1].replace(/\.pdf$/i, '').replace(/v\d+$/i, '');
+    }
+    return undefined;
   }
 
   /**
@@ -180,6 +201,7 @@ export class EnhancedGraphService extends GraphService {
           }
 
           // 構建基本的論文元數據
+          const arxivId = this.extractArxivId(url);
           const paperMetadata: PaperMetadata = {
             id: this.generatePaperId(citationResult.paperTitle || url),
             title: citationResult.paperTitle || 'Unknown Title',
@@ -187,6 +209,8 @@ export class EnhancedGraphService extends GraphService {
             year: citationResult.paperYear || 'Unknown',
             abstract: citationResult.paperAbstract,
             venue: citationResult.paperVenue,
+            url: url, // 保存原始 URL
+            arxivId: arxivId, // 提取 arXiv ID
             citationCount: citationResult.paperCitationCount, // 新增：引用次數
             citations: citationResult.citations || []
           };
@@ -254,6 +278,8 @@ export class EnhancedGraphService extends GraphService {
       year: metadata.year,
       abstract: metadata.abstract || '',
       venue: metadata.venue,
+      url: metadata.url, // 新增：論文 URL
+      arxivId: metadata.arxivId, // 新增：arXiv ID
       citationCount: metadata.citationCount, // 新增：引用次數
       
       // 簡化的結構化內容
@@ -504,6 +530,108 @@ export class EnhancedGraphService extends GraphService {
   }
 
   // 輔助方法
+  /**
+   * 獲取並添加 Derivative Works 到圖中
+   */
+  private async appendDerivativeWorks(graph: EnhancedPaperGraph, inputPapers: DeepPaperContext[]): Promise<void> {
+    console.log(`🔍 Fetching derivative works for ${inputPapers.length} papers...`);
+    
+    for (const paper of inputPapers) {
+      try {
+        const arxivId = paper.arxivId;
+        let citingPapers: Array<{
+          id: string; title: string; authors: string[]; year?: string; abstract?: string; url?: string; citationCount?: number;
+        }> = [];
+
+        // 1) 優先用 arXiv ID
+        if (arxivId) {
+          citingPapers = await SemanticScholarService.getAllCitingPapers(arxivId, {
+            maxResults: 150,
+            pagesToFetch: 3,
+            fetchAllAvailable: false
+          });
+        }
+
+        // 2) 若無 arXiv ID 或查不到，改用 Title+Authors+Year 拿 paperId 再查 citing
+        if (citingPapers.length === 0) {
+          const search = await SemanticScholarService.queryByTitleAndAuthors(paper.title, paper.authors, paper.year);
+          if (search.success && search.data?.paperId) {
+            citingPapers = await SemanticScholarService.getAllCitingPapers(search.data.paperId, {
+              maxResults: 150,
+              pagesToFetch: 3,
+              fetchAllAvailable: false
+            });
+          }
+        }
+
+        console.log(`📄 Found ${citingPapers.length} derivative works for "${paper.title.substring(0, 50)}..."`);
+
+        for (const citingPaper of citingPapers) {
+          // 1. 添加節點 (如果不存在)
+          const existingNodeIndex = graph.nodes.findIndex(n => n.id === citingPaper.id);
+          if (existingNodeIndex === -1) {
+            graph.nodes.push({
+              id: citingPaper.id,
+              title: citingPaper.title,
+              authors: citingPaper.authors,
+              year: citingPaper.year || 'Unknown',
+              abstract: citingPaper.abstract,
+              venue: 'Unknown',
+              citationCount: citingPaper.citationCount ?? undefined,
+              // 對於衍生作品，我們沒有深度分析，提供空的結構化分析
+              structuredAnalysis: {
+                contributions: [],
+                limitations: [],
+                methodology: '',
+                novelty_score: 0,
+                influence_score: 0
+              }
+            });
+          }
+
+          // 2. 添加邊 (Derivative -> Input Paper)
+          // 檢查邊是否已存在
+          const edgeExists = graph.edges.some(e => e.source === citingPaper.id && e.target === paper.id);
+          if (!edgeExists) {
+            // Create a basic edge with minimal analysisDetails
+            const basicEdge: DeepRelationshipEdge = {
+              source: citingPaper.id,
+              target: paper.id,
+              relationship: 'builds_on',
+              strength: 1.0,
+              description: 'Cites source paper (Derivative Work)',
+              evidence: 'Citation from Semantic Scholar',
+              analysisDetails: {
+                discourseDimensions: {
+                  methodological: { strength: 0, description: '' },
+                  theoretical: { strength: 0, description: '' },
+                  empirical: { strength: 0, description: '' },
+                  comparative: { strength: 0, description: '' }
+                },
+                citationPattern: {
+                  frequency: 1,
+                  distribution: 'unknown',
+                  prominence: 0.5,
+                  context_diversity: 0
+                },
+                semanticRelation: {
+                  agreement: 0,
+                  novelty: 0,
+                  dependency: 0.5,
+                  complementarity: 0
+                },
+                keyEvidence: []
+              }
+            };
+            graph.edges.push(basicEdge);
+          }
+        }
+      } catch (error) {
+        console.error(`❌ Failed to fetch derivative works for ${paper.title}:`, error);
+      }
+    }
+  }
+
   private generatePaperId(title: string): string {
     return title.toLowerCase()
       .replace(/[^a-z0-9\s]/g, '')

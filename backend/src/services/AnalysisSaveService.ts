@@ -177,7 +177,12 @@ export class AnalysisSaveService {
     userId: string,
     sessionTitle: string | undefined,
     papers: PaperData[],
-    graphData: GraphData
+    graphData: GraphData,
+    originalPapers?: {
+      urls?: string[];
+      priorWorks?: Record<string, any[]>;
+      derivativeWorks?: Record<string, any[]>;
+    }
   ): Promise<{ session: Session; analyses: Analysis[] }> {
     console.log(`\n🔵 ========== SAVE ANALYSIS START ==========`);
     console.log(`📥 Input graphData: ${graphData.nodes.length} nodes, ${graphData.edges.length} edges`);
@@ -215,14 +220,25 @@ export class AnalysisSaveService {
       to: e.to,
       label: e.label
     })));
-    const session = sessionRepository.create({
+    const sessionData: Partial<Session> = {
       userId,
       title: finalTitle,
       description: `Analysis of ${papers.length} papers`,
       graphSnapshot: JSON.stringify(normalizedGraphData), // Save normalized graphData for instant UI restoration
-    });
+      priorWorksSnapshot: originalPapers?.priorWorks ? JSON.stringify(originalPapers.priorWorks) : undefined,
+      derivativeWorksSnapshot: originalPapers?.derivativeWorks ? JSON.stringify(originalPapers.derivativeWorks) : undefined,
+    };
+    const session = sessionRepository.create(sessionData);
     const savedSession = await sessionRepository.save(session);
     console.log(`💾 Saved graphSnapshot to Session ${savedSession.id} with ${normalizedGraphData.nodes.length} nodes and ${normalizedGraphData.edges.length} edges`);
+    if (originalPapers?.priorWorks) {
+      const priorWorksCount = Object.values(originalPapers.priorWorks).flat().length;
+      console.log(`💾 Saved priorWorksSnapshot with ${priorWorksCount} prior works across ${Object.keys(originalPapers.priorWorks).length} papers`);
+    }
+    if (originalPapers?.derivativeWorks) {
+      const derivativeWorksCount = Object.values(originalPapers.derivativeWorks).flat().length;
+      console.log(`💾 Saved derivativeWorksSnapshot with ${derivativeWorksCount} derivative works across ${Object.keys(originalPapers.derivativeWorks).length} papers`);
+    }
 
     // 2. Upsert all papers
     const savedPapers: Paper[] = [];
@@ -447,7 +463,7 @@ export class AnalysisSaveService {
   /**
    * Get full graph data for a session
    */
-  async getSessionGraphData(sessionId: string): Promise<GraphData | null> {
+  async getSessionGraphData(sessionId: string, userId?: string): Promise<GraphData | null> {
     console.log(`\n🟢 ========== GET SESSION GRAPH DATA START ==========`);
     console.log(`📥 Loading session: ${sessionId}`);
     
@@ -474,6 +490,39 @@ export class AnalysisSaveService {
         // 建議再次 Normalize 確保 ID 格式統一 (全部轉字串)
         const normalizedSnapshot = this.normalizeGraphData(snapshotData);
         
+        // 讀取 prior works 和 derivative works
+        let priorWorks: Record<string, any[]> = {};
+        let derivativeWorks: Record<string, any[]> = {};
+        
+        if (session.priorWorksSnapshot) {
+          try {
+            priorWorks = JSON.parse(session.priorWorksSnapshot);
+            console.log(`📚 Found priorWorksSnapshot with ${Object.keys(priorWorks).length} papers, ${Object.values(priorWorks).flat().length} total prior works`);
+          } catch (error) {
+            console.error('Error parsing priorWorksSnapshot:', error);
+          }
+        }
+        
+        if (session.derivativeWorksSnapshot) {
+          try {
+            derivativeWorks = JSON.parse(session.derivativeWorksSnapshot);
+            console.log(`📚 Found derivativeWorksSnapshot with ${Object.keys(derivativeWorks).length} papers, ${Object.values(derivativeWorks).flat().length} total derivative works`);
+          } catch (error) {
+            console.error('Error parsing derivativeWorksSnapshot:', error);
+          }
+        }
+        
+        // 將 prior works 和 derivative works 附加到返回的數據中
+        // 确保返回的数据包含 priorWorks 和 derivativeWorks
+        const result: any = normalizedSnapshot;
+        result.priorWorks = priorWorks;
+        result.derivativeWorks = derivativeWorks;
+        result.originalPapers = {
+          urls: Object.keys(priorWorks).length > 0 ? Object.keys(priorWorks) : Object.keys(derivativeWorks),
+          priorWorks: priorWorks,
+          derivativeWorks: derivativeWorks
+        };
+        
         console.log(`📥 Returning snapshot: ${normalizedSnapshot.nodes.length} nodes, ${normalizedSnapshot.edges.length} edges`);
         if (normalizedSnapshot.edges.length > 0) {
           console.log(`📥 Snapshot edges sample (first 3):`, normalizedSnapshot.edges.slice(0, 3).map((e: any) => ({
@@ -483,8 +532,9 @@ export class AnalysisSaveService {
             label: e.label
           })));
         }
+        console.log(`✅ Returning graphData with priorWorks (${Object.values(priorWorks).flat().length} items) and derivativeWorks (${Object.values(derivativeWorks).flat().length} items)`);
         console.log(`🟢 ========== GET SESSION GRAPH DATA END ==========\n`);
-        return normalizedSnapshot;
+        return result;
       } catch (error) {
         console.error("❌ Error parsing graphSnapshot, falling back to analysis merging:", error);
         // 如果 JSON 解析失敗，才執行下面的 Fallback 邏輯
@@ -596,7 +646,12 @@ export class AnalysisSaveService {
   async updateSessionGraph(
     sessionId: string,
     userId: string,
-    graphData: GraphData
+    graphData: GraphData,
+    originalPapers?: {
+      urls?: string[];
+      priorWorks?: Record<string, any[]>;
+      derivativeWorks?: Record<string, any[]>;
+    }
   ): Promise<{ session: Session; analyses: Analysis[] }> {
     const sessionRepository = AppDataSource.getRepository(Session);
     const analysisRepository = AppDataSource.getRepository(Analysis);
@@ -618,6 +673,20 @@ export class AnalysisSaveService {
 
     // Update graphSnapshot in Session (Snapshot Layer)
     session.graphSnapshot = JSON.stringify(normalizedData); // 使用 normalizedData
+    
+    // Update prior works and derivative works if provided
+    if (originalPapers?.priorWorks) {
+      session.priorWorksSnapshot = JSON.stringify(originalPapers.priorWorks);
+      const priorWorksCount = Object.values(originalPapers.priorWorks).flat().length;
+      console.log(`💾 Updated priorWorksSnapshot with ${priorWorksCount} prior works`);
+    }
+    
+    if (originalPapers?.derivativeWorks) {
+      session.derivativeWorksSnapshot = JSON.stringify(originalPapers.derivativeWorks);
+      const derivativeWorksCount = Object.values(originalPapers.derivativeWorks).flat().length;
+      console.log(`💾 Updated derivativeWorksSnapshot with ${derivativeWorksCount} derivative works`);
+    }
+    
     await sessionRepository.save(session);
     console.log(`💾 Updated graphSnapshot in Session ${sessionId}`);
 
@@ -631,34 +700,17 @@ export class AnalysisSaveService {
     console.log(`📊 Existing papers in session: ${existingPapers.length}`);
     console.log(`📊 NormalizedData to save: ${normalizedData.nodes.length} nodes, ${normalizedData.edges.length} edges`);
     
-    // Filter nodes to only include existing papers (handle deleted nodes)
-    const validNodeIds = new Set(existingPapers.map(p => p.id));
-    const filteredNodes = normalizedData.nodes.filter(n => {
-      const nodeId = paperIdMap.get(n.id) || n.id;
-      return validNodeIds.has(nodeId);
-    });
-    
-    // Filter edges to only include edges between existing papers (handle deleted nodes)
-    const filteredEdges = normalizedData.edges.filter(e => {
-      const edgeAny = e as any;
-      const fromId = edgeAny.from || (typeof edgeAny.source === 'string' ? edgeAny.source : (edgeAny.source as any)?.id);
-      const toId = edgeAny.to || (typeof edgeAny.target === 'string' ? edgeAny.target : (edgeAny.target as any)?.id);
-      const mappedFrom = paperIdMap.get(fromId) || fromId;
-      const mappedTo = paperIdMap.get(toId) || toId;
-      return validNodeIds.has(mappedFrom) && validNodeIds.has(mappedTo);
-    });
-    
-    console.log(`📊 After filtering (removed deleted nodes/edges): ${filteredNodes.length} nodes, ${filteredEdges.length} edges`);
-
-    // Create a single relationship graph with filtered nodes and edges
-    // This ensures we preserve the complete graph structure while handling deletions
+    // IMPORTANT: 保留完整的 graph 数据，不要过滤
+    // Graph 中可能包含很多 nodes（包括引用关系中的论文），这些都应该保留
+    // 只过滤掉确实被用户删除的 nodes（如果有删除标记的话）
+    // 目前我们直接使用完整的 normalizedData，不做过滤
     const relationshipGraph = {
-      nodes: filteredNodes.map(n => ({
+      nodes: normalizedData.nodes.map(n => ({
         ...n,
-        id: paperIdMap.get(n.id) || n.id,
+        id: n.id, // 保留原始 ID
         label: n.label || '',
       })),
-      edges: filteredEdges.map(e => {
+      edges: normalizedData.edges.map(e => {
         // Support both 'from/to' and 'source/target' formats
         const edgeAny = e as any;
         const fromId = edgeAny.from || (typeof edgeAny.source === 'string' ? edgeAny.source : (edgeAny.source as any)?.id);
@@ -731,9 +783,9 @@ export class AnalysisSaveService {
       .where('fromPaperId IN (:...paperIds) OR toPaperId IN (:...paperIds)', { paperIds })
       .execute();
 
-    // Then, create new relations from normalizedData edges
+    // Then, create new relations from normalizedData edges (only for edges between existing papers)
     const relationsToSave: PaperRelation[] = [];
-    for (const edge of filteredEdges) {
+    for (const edge of normalizedData.edges) {
       // Support both 'from/to' and 'source/target' formats
       const fromId = edge.from || (typeof edge.source === 'string' ? edge.source : (edge.source as any)?.id);
       const toId = edge.to || (typeof edge.target === 'string' ? edge.target : (edge.target as any)?.id);

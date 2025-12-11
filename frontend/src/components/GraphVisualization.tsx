@@ -36,6 +36,25 @@ const GraphVisualization: React.FC<GraphVisualizationProps> = ({
   // Multi-select hint collapse state
   const [showMultiSelectHint, setShowMultiSelectHint] = useState(true);
 
+  // Helper: check if node is connected to the currently clicked edge
+  const isNodeConnectedToClickedEdge = (nodeId: string): boolean => {
+    const activeEdge = clickedEdge || selectedEdge;
+    if (!activeEdge) return false;
+    const sourceId = typeof activeEdge.source === 'string' ? activeEdge.source : (activeEdge.source as Node)?.id;
+    const targetId = typeof activeEdge.target === 'string' ? activeEdge.target : (activeEdge.target as Node)?.id;
+    return sourceId === nodeId || targetId === nodeId;
+  };
+
+  const clearAllSelections = () => {
+    setSelectedNode(null);
+    setSelectedEdge(null);
+    setClickedNode(null);
+    setClickedEdge(null);
+    setHoveredNode(null);
+    setHoveredEdge(null);
+    setSelectedNodeIds(new Set());
+  };
+
   // Helper function to check if a node is a source paper
   const isSourceNode = (nodeId: string): boolean => {
     return data.originalPapers?.includes(nodeId) || false;
@@ -66,9 +85,7 @@ const GraphVisualization: React.FC<GraphVisualizationProps> = ({
       })
     };
     setData(newData);
-    setSelectedNodeIds(new Set());
-    setSelectedNode(null);
-    setClickedNode(null);
+    clearAllSelections();
     setDataVersion(prev => prev + 1);
     if (onDataUpdate) {
       onDataUpdate(newData);
@@ -192,8 +209,7 @@ const GraphVisualization: React.FC<GraphVisualizationProps> = ({
       })
     };
     setData(newData);
-    setSelectedNode(null);
-    setClickedNode(null);
+    clearAllSelections();
     setDataVersion(prev => prev + 1);
     if (onDataUpdate) {
       onDataUpdate(newData);
@@ -346,6 +362,13 @@ const GraphVisualization: React.FC<GraphVisualizationProps> = ({
     
     const dropShadow = defs.append('filter').attr('id', 'dropShadow').attr('x', '-50%').attr('y', '-50%').attr('width', '200%').attr('height', '200%');
     dropShadow.append('feDropShadow').attr('dx', 1).attr('dy', 2).attr('stdDeviation', 2).attr('flood-color', '#64c864').attr('flood-opacity', 0.3);
+    
+    // Glow filter for selected nodes
+    const glow = defs.append('filter').attr('id', 'glow').attr('x', '-50%').attr('y', '-50%').attr('width', '200%').attr('height', '200%');
+    glow.append('feGaussianBlur').attr('stdDeviation', 3).attr('result', 'coloredBlur');
+    const glowFeMerge = glow.append('feMerge');
+    glowFeMerge.append('feMergeNode').attr('in', 'coloredBlur');
+    glowFeMerge.append('feMergeNode').attr('in', 'SourceGraphic');
 
     const edgeGradient = defs.append('linearGradient').attr('id', 'edgeGradient');
     edgeGradient.append('stop').attr('offset', '0%').attr('stop-color', '#64c864').attr('stop-opacity', 0.6);
@@ -421,24 +444,75 @@ const GraphVisualization: React.FC<GraphVisualizationProps> = ({
     const nodesEnter = nodes.enter().append('circle').attr('class', 'node');
     const nodesUpdate = nodesEnter.merge(nodes as any);
     
-    // Update links styling
+    const nodePrimaryColor = '#38bdf8'; // blue glow for selected nodes
+    const nodeMultiColor = '#38bdf8';   // same blue for multi-select
+    const edgeHighlightColor = '#c084fc'; // clicked edge / edge-connected nodes
+    
+    // Determine active edge (for maintaining purple highlight)
+    const activeEdge = clickedEdge || selectedEdge;
+
+    // Update links styling - maintain purple highlight for selected edge
     linksUpdate
-      .attr('stroke', 'rgba(100, 200, 100, 0.5)')
-      .attr('stroke-width', (d: any) => Math.sqrt(d.strength * 8) + 1)
-      .attr('opacity', 0.6)
+      .attr('stroke', (d: any) => {
+        if (activeEdge && d === activeEdge) return edgeHighlightColor; // Purple for selected edge
+        return 'rgba(100, 200, 100, 0.5)';
+      })
+      .attr('stroke-width', (d: any) => {
+        if (activeEdge && d === activeEdge) return Math.sqrt((d.strength || 1) * 12) + 6; // Thicker for selected edge
+        return Math.sqrt((d.strength || 1) * 8) + 1;
+      })
+      .attr('opacity', (d: any) => {
+        if (activeEdge && d === activeEdge) return 1.0; // Full opacity for selected edge
+        return activeEdge ? 0.3 : 0.6; // Dim other edges when one is selected
+      })
       .style('cursor', 'pointer');
     
-    // Update nodes styling
+    // Update nodes styling - make selected nodes more visible and distinguish states
     nodesUpdate
       .attr('r', 26)
-      .attr('fill', (d: Node) => isSourceNode(d.id) ? 'url(#sourceNodeGradient)' : 'url(#nodeGradient)')
+      .attr('fill', (d: Node) => {
+        if (clickedNode && clickedNode.id === d.id) {
+          return isSourceNode(d.id) ? 'url(#sourceNodeHoverGradient)' : 'url(#nodeHoverGradient)';
+        }
+        if (selectedNodeIds.has(d.id)) {
+          return isSourceNode(d.id) ? 'url(#sourceNodeGradient)' : 'url(#nodeGradient)';
+        }
+        if (isNodeConnectedToClickedEdge(d.id)) {
+          return isSourceNode(d.id) ? 'url(#sourceNodeHoverGradient)' : 'url(#nodeHoverGradient)';
+        }
+        return isSourceNode(d.id) ? 'url(#sourceNodeGradient)' : 'url(#nodeGradient)';
+      })
       .attr('stroke', (d: Node) => {
-        return selectedNodeIds.has(d.id) ? '#64c864' : 'rgba(100, 200, 100, 0.4)';
+        if (clickedNode && clickedNode.id === d.id) {
+          return nodePrimaryColor; // Bright green for clicked node
+        }
+        if (selectedNodeIds.has(d.id)) {
+          return nodeMultiColor; // Cyan for multi-selected nodes
+        }
+        if (isNodeConnectedToClickedEdge(d.id)) {
+          return edgeHighlightColor; // Purple for nodes connected to clicked edge
+        }
+        return 'rgba(100, 200, 100, 0.4)';
       })
       .attr('stroke-width', (d: Node) => {
-        return selectedNodeIds.has(d.id) ? 3 : 2;
+        if (clickedNode && clickedNode.id === d.id) {
+          return 4; // Thicker border for clicked node
+        }
+        if (selectedNodeIds.has(d.id)) {
+          return 3;
+        }
+        if (isNodeConnectedToClickedEdge(d.id)) {
+          return 3;
+        }
+        return 2;
       })
-      .attr('filter', 'url(#dropShadow)')
+      .attr('filter', (d: Node) => {
+        // Add glow effect for clicked, multi-selected, or edge-connected nodes
+        if ((clickedNode && clickedNode.id === d.id) || selectedNodeIds.has(d.id) || isNodeConnectedToClickedEdge(d.id)) {
+          return 'url(#dropShadow) url(#glow)';
+        }
+        return 'url(#dropShadow)';
+      })
       .style('cursor', 'pointer');
 
     svg.on('click', function(event) {
@@ -447,27 +521,7 @@ const GraphVisualization: React.FC<GraphVisualizationProps> = ({
         if (isEditingNode || isEditingEdge) {
           return;
         }
-        
-        // Reset all visual states
-        linksUpdate.attr('stroke', 'rgba(100, 200, 100, 0.5)').attr('opacity', 0.6).attr('stroke-width', (d: any) => Math.sqrt(d.strength * 8) + 1);
-        nodesUpdate
-          .attr('r', 26)
-          .attr('fill', (d: Node) => isSourceNode(d.id) ? 'url(#sourceNodeGradient)' : 'url(#nodeGradient)')
-          .attr('stroke', (d: Node) => {
-            return selectedNodeIds.has(d.id) ? '#9F7AEA' : '#F5F5DC';
-          })
-          .attr('stroke-width', (d: Node) => {
-            return selectedNodeIds.has(d.id) ? 3 : 2;
-          });
-        
-        // Clear all states
-        setSelectedNode(null);
-        setSelectedEdge(null);
-        setClickedNode(null);
-        setClickedEdge(null);
-        setHoveredNode(null);
-        setHoveredEdge(null);
-        setSelectedNodeIds(new Set());
+        clearAllSelections();
       }
     });
   
@@ -569,28 +623,43 @@ const GraphVisualization: React.FC<GraphVisualizationProps> = ({
         setEditNodeData(null);
         setEditEdgeData(null);
         
-        // Apply clicked edge styling
+        // Apply clicked edge styling - edge and connected nodes should be purple
+        const edgeHighlightColor = '#c084fc'; // Purple for edge highlighting
         linksUpdate
-          .attr('stroke', (linkData: any) => (linkData === d) ? 'url(#edgeGradient)' : '#EAE8E1')
-          .attr('opacity', (linkData: any) => (linkData === d) ? 1 : 0.3)
-          .attr('stroke-width', (linkData: any) => (linkData === d) ? Math.sqrt(linkData.strength * 12) + 6 : Math.sqrt(linkData.strength * 12) + 3);
+          .attr('stroke', (linkData: any) => (linkData === d) ? edgeHighlightColor : 'rgba(100, 200, 100, 0.3)')
+          .attr('opacity', (linkData: any) => (linkData === d) ? 1.0 : 0.3)
+          .attr('stroke-width', (linkData: any) => (linkData === d) 
+            ? Math.sqrt((linkData.strength || 1) * 12) + 6 
+            : Math.sqrt((linkData.strength || 1) * 8) + 1);
         
         nodesUpdate
           .attr('r', (nodeData: any) => {
             const sourceId = typeof d.source === 'string' ? d.source : (d.source as Node)?.id;
             const targetId = typeof d.target === 'string' ? d.target : (d.target as Node)?.id;
-            return (nodeData.id === sourceId || nodeData.id === targetId) ? 28 : 25;
+            return (nodeData.id === sourceId || nodeData.id === targetId) ? 28 : 26;
           })
-          .attr('fill', (nodeData: any) => isSourceNode(nodeData.id) ? 'url(#sourceNodeGradient)' : 'url(#nodeGradient)')
+          .attr('fill', (nodeData: any) => {
+            const sourceId = typeof d.source === 'string' ? d.source : (d.source as Node)?.id;
+            const targetId = typeof d.target === 'string' ? d.target : (d.target as Node)?.id;
+            if (nodeData.id === sourceId || nodeData.id === targetId) {
+              return isSourceNode(nodeData.id) ? 'url(#sourceNodeHoverGradient)' : 'url(#nodeHoverGradient)';
+            }
+            return isSourceNode(nodeData.id) ? 'url(#sourceNodeGradient)' : 'url(#nodeGradient)';
+          })
           .style('stroke', (nodeData: any) => {
             const sourceId = typeof d.source === 'string' ? d.source : (d.source as Node)?.id;
             const targetId = typeof d.target === 'string' ? d.target : (d.target as Node)?.id;
-            return (nodeData.id === sourceId || nodeData.id === targetId) ? '#64c864' : 'rgba(100, 200, 100, 0.4)';
+            return (nodeData.id === sourceId || nodeData.id === targetId) ? edgeHighlightColor : 'rgba(100, 200, 100, 0.4)'; // Purple for edge-connected nodes
           })
           .style('stroke-width', (nodeData: any) => {
             const sourceId = typeof d.source === 'string' ? d.source : (d.source as Node)?.id;
             const targetId = typeof d.target === 'string' ? d.target : (d.target as Node)?.id;
-            return (nodeData.id === sourceId || nodeData.id === targetId) ? 4 : 2;
+            return (nodeData.id === sourceId || nodeData.id === targetId) ? 3 : 2;
+          })
+          .attr('filter', (nodeData: any) => {
+            const sourceId = typeof d.source === 'string' ? d.source : (d.source as Node)?.id;
+            const targetId = typeof d.target === 'string' ? d.target : (d.target as Node)?.id;
+            return (nodeData.id === sourceId || nodeData.id === targetId) ? 'url(#dropShadow) url(#glow)' : 'url(#dropShadow)';
           });
       })
     linksUpdate
@@ -608,10 +677,13 @@ const GraphVisualization: React.FC<GraphVisualizationProps> = ({
         // Only restore if this edge is not clicked
         if (!clickedEdge || clickedEdge !== d) {
           setHoveredEdge(null);
+          const activeEdge = clickedEdge || selectedEdge;
           d3.select(this)
-            .attr('stroke', 'rgba(100, 200, 100, 0.5)')
-            .attr('opacity', 0.6)
-            .attr('stroke-width', Math.sqrt(d.strength * 8) + 1);
+            .attr('stroke', (activeEdge && d === activeEdge) ? '#c084fc' : 'rgba(100, 200, 100, 0.5)')
+            .attr('opacity', (activeEdge && d === activeEdge) ? 1.0 : (activeEdge ? 0.3 : 0.6))
+            .attr('stroke-width', (activeEdge && d === activeEdge) 
+              ? Math.sqrt((d.strength || 1) * 12) + 6 
+              : Math.sqrt((d.strength || 1) * 8) + 1);
         }
       });
 
@@ -632,32 +704,12 @@ const GraphVisualization: React.FC<GraphVisualizationProps> = ({
           if (isEditingNode) {
             return;
           }
-          
-          // Clicked the same node again: toggle off selection
-          setClickedNode(null);
-          setSelectedNode(null);
-          setSelectedNodeIds(new Set());
-          // Restore all nodes and links to initial state
-          linksUpdate
-            .attr('stroke', 'rgba(100, 200, 100, 0.5)')
-            .attr('opacity', 0.6)
-            .attr('stroke-width', (linkData: any) => Math.sqrt(linkData.strength * 8) + 1);
-          
-          nodesUpdate
-            .attr('r', 26)
-            .attr('fill', (d: Node) => isSourceNode(d.id) ? 'url(#sourceNodeGradient)' : 'url(#nodeGradient)')
-            .attr('stroke', (nodeData: any) => {
-              return selectedNodeIds.has(nodeData.id) ? '#9F7AEA' : '#F5F5DC';
-            })
-            .attr('stroke-width', (nodeData: any) => {
-              return selectedNodeIds.has(nodeData.id) ? 3 : 2;
-            });
+          clearAllSelections();
         } else {
           // Clicked a new node: set as current clicked node
           setClickedNode(d);
           setSelectedNode(d);
           setSelectedNodeIds(new Set([d.id]));
-          setClickedEdge(null); // Clear clicked edge state
           
           // Exit any existing editing mode when clicking a different node
           setIsEditingNode(false);
@@ -670,7 +722,7 @@ const GraphVisualization: React.FC<GraphVisualizationProps> = ({
             .attr('stroke', (linkData: any) => {
               const sourceId = typeof linkData.source === 'string' ? linkData.source : (linkData.source as Node).id;
               const targetId = typeof linkData.target === 'string' ? linkData.target : (linkData.target as Node).id;
-              return (sourceId === d.id || targetId === d.id) ? 'url(#edgeGradient)' : '#D2CBBF';
+            return (sourceId === d.id || targetId === d.id) ? '#c084fc' : 'rgba(100, 200, 100, 0.5)';
             })
             .attr('opacity', (linkData: any) => {
               const sourceId = typeof linkData.source === 'string' ? linkData.source : (linkData.source as Node).id;
@@ -692,8 +744,8 @@ const GraphVisualization: React.FC<GraphVisualizationProps> = ({
               return isSourceNode(nodeData.id) ? 'url(#sourceNodeGradient)' : 'url(#nodeGradient)';
             })
             .attr('stroke', (nodeData: any) => {
-              if (nodeData.id === d.id) return '#c3a4ffff';
-              return selectedNodeIds.has(nodeData.id) ? '#9F7AEA' : '#F5F5DC';
+              if (nodeData.id === d.id) return '#38bdf8';
+              return selectedNodeIds.has(nodeData.id) ? '#38bdf8' : 'rgba(100, 200, 100, 0.4)';
             })
             .attr('stroke-width', (nodeData: any) => {
               if (nodeData.id === d.id) return 3;
@@ -847,11 +899,49 @@ const GraphVisualization: React.FC<GraphVisualizationProps> = ({
     const yearLabelsUpdate = yearLabelsEnter.merge(yearLabels as any);
     yearLabelsUpdate.text((d) => {
         if (!d.year) return '';
-        if (d.year.includes('-')) {
-          const parts = d.year.split('-');
-          return parts[0].slice(-2) + parts[1];
+        
+        // 统一格式化为完整的四位数西元年份
+        // 处理各种可能的格式：'2017', '17', "'17", "2015", "1953", "2308" (2023年8月), "2017-2018"等
+        let yearStr = String(d.year).trim();
+        
+        // 如果包含 '-' 或 '/'，只取第一部分（年份部分）
+        if (yearStr.includes('-') || yearStr.includes('/')) {
+          yearStr = yearStr.split(/[-\/]/)[0].trim();
         }
-        return `'${d.year.slice(-2)}`;
+        
+        // 移除单引号或其他前缀
+        yearStr = yearStr.replace(/^['"]*/, '').replace(/['"]*$/, '');
+        
+        // 转换为数字
+        let yearNum = parseInt(yearStr, 10);
+        
+        // 如果是 NaN，尝试其他解析方式
+        if (isNaN(yearNum)) {
+          // 尝试提取数字部分
+          const match = yearStr.match(/\d{4}|\d{2}/);
+          if (match) {
+            yearNum = parseInt(match[0], 10);
+            // 如果是两位数，判断是 1900 还是 2000 年代
+            if (match[0].length === 2) {
+              yearNum = yearNum < 50 ? 2000 + yearNum : 1900 + yearNum;
+        }
+          } else {
+            return ''; // 无法解析，返回空
+          }
+        } else {
+          // 如果是两位数，判断是 1900 还是 2000 年代
+          if (yearNum < 100) {
+            yearNum = yearNum < 50 ? 2000 + yearNum : 1900 + yearNum;
+          }
+        }
+        
+        // 确保年份在合理范围内（1900-2100）
+        if (yearNum < 1900 || yearNum > 2100) {
+          return ''; // 超出范围，返回空
+        }
+        
+        // 返回完整的四位数年份
+        return String(yearNum);
       });
 
     const drag = d3.drag<SVGCircleElement, Node>()
@@ -915,7 +1005,7 @@ const GraphVisualization: React.FC<GraphVisualizationProps> = ({
     return () => {
       simulation.stop();
     };
-  }, [data, dataVersion, onDataUpdate, isEditingNode, isEditingEdge, showIsolatedNodes, selectedNodeIds, hasEdges]);
+  }, [data, dataVersion, onDataUpdate, isEditingNode, isEditingEdge, showIsolatedNodes, selectedNodeIds, hasEdges, clickedEdge, selectedEdge]);
 
   // Separate useEffect to maintain highlighting during editing
   useEffect(() => {
@@ -924,13 +1014,75 @@ const GraphVisualization: React.FC<GraphVisualizationProps> = ({
     const svg = d3.select(svgRef.current);
     const links = svg.selectAll('.link');
     const nodes = svg.selectAll('.node');
+
+    const nodePrimaryColor = '#38bdf8'; // blue for selected nodes
+    const nodeMultiColor = '#38bdf8';   // blue for multi-selected nodes
+    const edgeHighlightColor = '#c084fc'; // purple for selected edge & endpoints
+    const activeEdge = clickedEdge || selectedEdge;
+
+    // Base highlighting for current selections / hovers
+    links
+      .attr('stroke', (linkData: any) => {
+        if (activeEdge && linkData === activeEdge) return edgeHighlightColor;
+        if (hoveredEdge && linkData === hoveredEdge) return '#64c864';
+        return 'rgba(100, 200, 100, 0.5)';
+      })
+      .attr('opacity', (linkData: any) => {
+        if (activeEdge && linkData === activeEdge) return 1;
+        if (hoveredEdge && linkData === hoveredEdge) return 0.8;
+        return 0.6;
+      })
+      .attr('stroke-width', (linkData: any) => {
+        const baseWidth = Math.sqrt((linkData.strength || 1) * 8) + 1;
+        if (activeEdge && linkData === activeEdge) return Math.sqrt((linkData.strength || 1) * 12) + 6;
+        if (hoveredEdge && linkData === hoveredEdge) return Math.sqrt((linkData.strength || 1) * 10) + 2;
+        return baseWidth;
+      });
+
+    nodes
+      .attr('r', (nodeData: any) => {
+        if (clickedNode && clickedNode.id === nodeData.id) return 32;
+        if (selectedNodeIds.has(nodeData.id)) return 28;
+        if (isNodeConnectedToClickedEdge(nodeData.id)) return 28;
+        return 26;
+      })
+      .attr('fill', (nodeData: any) => {
+        if (clickedNode && clickedNode.id === nodeData.id) {
+          return isSourceNode(nodeData.id) ? 'url(#sourceNodeHoverGradient)' : 'url(#nodeHoverGradient)';
+        }
+        if (selectedNodeIds.has(nodeData.id)) {
+          return isSourceNode(nodeData.id) ? 'url(#sourceNodeHoverGradient)' : 'url(#nodeHoverGradient)';
+        }
+        if (isNodeConnectedToClickedEdge(nodeData.id)) {
+          return isSourceNode(nodeData.id) ? 'url(#sourceNodeHoverGradient)' : 'url(#nodeHoverGradient)';
+        }
+        return isSourceNode(nodeData.id) ? 'url(#sourceNodeGradient)' : 'url(#nodeGradient)';
+      })
+      .style('stroke', (nodeData: any) => {
+        if (clickedNode && clickedNode.id === nodeData.id) return nodePrimaryColor;
+        if (selectedNodeIds.has(nodeData.id)) return nodeMultiColor;
+        if (isNodeConnectedToClickedEdge(nodeData.id)) return edgeHighlightColor;
+        return 'rgba(100, 200, 100, 0.4)';
+      })
+      .style('stroke-width', (nodeData: any) => {
+        if (clickedNode && clickedNode.id === nodeData.id) return 4;
+        if (selectedNodeIds.has(nodeData.id)) return 3;
+        if (isNodeConnectedToClickedEdge(nodeData.id)) return 3;
+        return 2;
+      })
+      .attr('filter', (nodeData: any) => {
+        if ((clickedNode && clickedNode.id === nodeData.id) || selectedNodeIds.has(nodeData.id) || isNodeConnectedToClickedEdge(nodeData.id)) {
+          return 'url(#dropShadow) url(#glow)';
+        }
+        return 'url(#dropShadow)';
+      });
     
     // Maintain node highlighting during editing
     if (isEditingNode && selectedNode) {
       links
-        .attr('stroke', (linkData: any) => ((linkData.source as Node).id === selectedNode.id || (linkData.target as Node).id === selectedNode.id) ? 'url(#edgeGradient)' : '#D2CBBF')
+        .attr('stroke', (linkData: any) => ((linkData.source as Node).id === selectedNode.id || (linkData.target as Node).id === selectedNode.id) ? 'url(#edgeGradient)' : 'rgba(100, 200, 100, 0.3)')
         .attr('opacity', (linkData: any) => ((linkData.source as Node).id === selectedNode.id || (linkData.target as Node).id === selectedNode.id) ? 0.9 : 0.3)
-        .attr('stroke-width', (linkData: any) => ((linkData.source as Node).id === selectedNode.id || (linkData.target as Node).id === selectedNode.id) ? Math.sqrt(linkData.strength * 8) + 3 : Math.sqrt(linkData.strength * 8) + 1);
+        .attr('stroke-width', (linkData: any) => ((linkData.source as Node).id === selectedNode.id || (linkData.target as Node).id === selectedNode.id) ? Math.sqrt((linkData.strength || 1) * 8) + 3 : Math.sqrt((linkData.strength || 1) * 8) + 1);
       
       nodes
         .attr('r', (nodeData: any) => nodeData.id === selectedNode.id ? 32 : 26)
@@ -940,7 +1092,7 @@ const GraphVisualization: React.FC<GraphVisualizationProps> = ({
           }
           return isSourceNode(nodeData.id) ? 'url(#sourceNodeGradient)' : 'url(#nodeGradient)';
         })
-        .style('stroke', (nodeData: any) => nodeData.id === selectedNode.id ? '#64c864' : 'rgba(100, 200, 100, 0.4)')
+        .style('stroke', (nodeData: any) => nodeData.id === selectedNode.id ? nodePrimaryColor : 'rgba(100, 200, 100, 0.4)')
         .style('stroke-width', (nodeData: any) => nodeData.id === selectedNode.id ? 3 : 2);
     }
     
@@ -949,7 +1101,7 @@ const GraphVisualization: React.FC<GraphVisualizationProps> = ({
       links
         .attr('stroke', (linkData: any) => (linkData === selectedEdge) ? 'url(#edgeGradient)' : 'rgba(100, 200, 100, 0.3)')
         .attr('opacity', (linkData: any) => (linkData === selectedEdge) ? 1 : 0.3)
-        .attr('stroke-width', (linkData: any) => (linkData === selectedEdge) ? Math.sqrt(linkData.strength * 12) + 6 : Math.sqrt(linkData.strength * 12) + 3);
+        .attr('stroke-width', (linkData: any) => (linkData === selectedEdge) ? Math.sqrt((linkData.strength || 1) * 12) + 6 : Math.sqrt((linkData.strength || 1) * 12) + 3);
       
       nodes
         .attr('r', (nodeData: any) => {
@@ -961,7 +1113,7 @@ const GraphVisualization: React.FC<GraphVisualizationProps> = ({
         .style('stroke', (nodeData: any) => {
           const sourceId = (selectedEdge.source as Node).id || selectedEdge.source;
           const targetId = (selectedEdge.target as Node).id || selectedEdge.target;
-          return (nodeData.id === sourceId || nodeData.id === targetId) ? '#64c864' : 'rgba(100, 200, 100, 0.4)';
+          return (nodeData.id === sourceId || nodeData.id === targetId) ? nodePrimaryColor : 'rgba(100, 200, 100, 0.4)';
         })
         .style('stroke-width', (nodeData: any) => {
           const sourceId = (selectedEdge.source as Node).id || selectedEdge.source;
@@ -969,7 +1121,12 @@ const GraphVisualization: React.FC<GraphVisualizationProps> = ({
           return (nodeData.id === sourceId || nodeData.id === targetId) ? 4 : 2;
         });
     }
-  }, [isEditingNode, isEditingEdge, selectedNode, selectedEdge, data]);
+  }, [isEditingNode, isEditingEdge, selectedNode, selectedEdge, data, clickedNode, clickedEdge, hoveredEdge, selectedNodeIds]);
+
+   // Keep panels below multi-select hints - adjusted to be closer to hint without overlapping
+   // Multi-select hint + delete button can take ~180-200px, but we want less gap
+   // When only edge is selected (no node), use same position as when only node is selected
+   const overlayTop = (selectedNodeIds.size > 0 || selectedEdge) ? 170 : 150;
 
   return (
     <div style={{ width: '100%', height: '100%', position: 'relative', backgroundColor: '#1e1e1e', borderRadius: '12px', overflow: 'hidden' }}>
@@ -1187,69 +1344,83 @@ const GraphVisualization: React.FC<GraphVisualizationProps> = ({
       
       <svg ref={svgRef} style={{ width: '100%', height: '100%', display: 'block', border: `1px solid rgba(100, 200, 100, 0.2)`, backgroundColor: '#1e1e1e', borderRadius: '12px' }} />
       
-      {selectedNode && !isEditingNode && (() => {
-        // Calculate position to keep panel within bounds
-        const panelWidth = 500;
-        const panelMaxHeight = 280;
-        const padding = 16;
+      {/* Left overlay: selection badges + node/edge info panels */}
+      <div
+        style={{
+          position: 'absolute',
+          left: '12px',
+          top: `${overlayTop}px`, // avoid covering Show All toggle & multi-select hint
+          width: '360px',
+          display: 'flex',
+          flexDirection: 'column',
+          gap: '12px',
+          zIndex: 1100,
+          pointerEvents: 'none',
+        }}
+      >
+        {/* Selection badges */}
+        <div style={{ display: 'flex', flexDirection: 'column', gap: '8px', pointerEvents: 'auto' }}>
+          {selectedNodeIds.size > 1 && (
+            <div style={{
+              background: '#0b1f29',
+              border: '1px solid rgba(34, 211, 238, 0.6)',
+              color: '#22d3ee',
+              padding: '8px 10px',
+              borderRadius: '10px',
+              fontSize: '12px',
+              fontWeight: 600,
+              boxShadow: '0 2px 8px rgba(0,0,0,0.35)',
+              display: 'flex',
+              justifyContent: 'space-between',
+              alignItems: 'center',
+              gap: '8px'
+            }}>
+              <span>Multi-select: {selectedNodeIds.size} nodes</span>
+              <button
+                onClick={handleDeleteSelectedNodes}
+                style={{
+                  background: '#ef4444',
+                  color: '#1e1e1e',
+                  border: 'none',
+                  borderRadius: '8px',
+                  padding: '6px 10px',
+                  fontWeight: 700,
+                  fontSize: '12px',
+                  cursor: 'pointer',
+                  boxShadow: '0 2px 8px rgba(239,68,68,0.4)'
+                }}
+              >
+                Delete
+              </button>
+            </div>
+          )}
+        </div>
+
+        {/* Node edit panel - render BEFORE info panel so it appears in same position */}
+        {isEditingNode && editNodeData && (() => {
+          const panelWidth = 360;
+          const panelMaxHeight = 540;
         const container = svgRef.current?.parentElement;
-        const containerWidth = container?.clientWidth || 1000;
         const containerHeight = container?.clientHeight || 700;
-        
-        // Default position: top-right
-        let top = 24;
-        let right = padding;
-        
-        // Adjust if panel would overflow
-        if (panelWidth + padding * 2 > containerWidth) {
-          right = padding;
-        }
-        
-        if (panelMaxHeight + top + padding > containerHeight) {
-          top = Math.max(padding, containerHeight - panelMaxHeight - padding);
-        }
-        
+          const maxH = Math.min(panelMaxHeight, containerHeight - 40);
         return (
         <div style={{ 
-          position: 'absolute', 
-          top: `${top}px`, 
-          right: `${right}px`, 
-          background: '#2d2d2d', 
+              pointerEvents: 'auto',
+              background: '#1e1e1e',
           border: `1px solid rgba(100, 200, 100, 0.3)`, 
-          padding: '20px', 
+              padding: '16px',
           borderRadius: '12px', 
           boxShadow: '0 3px 12px rgba(189, 180, 211, 0.25)', 
-          width: `${Math.min(panelWidth, containerWidth - padding * 2)}px`, 
-          maxHeight: `${Math.min(panelMaxHeight, containerHeight - top - padding)}px`, 
+              width: `${panelWidth}px`,
+              maxHeight: `${maxH}px`,
           overflowY: 'auto', 
-          fontFamily: '"Lora", "Merriweather", "Georgia", serif',
-          zIndex: 1001
-        }}>
-          <h3 style={{ margin: '0 0 16px 0', color: '#e8e8e8', fontSize: '16px', fontWeight: '600', lineHeight: '1.4', fontFamily: '-apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif' }}>{selectedNode.title}</h3>
-          <div style={{ marginTop: '16px', display: 'flex', justifyContent: 'flex-end', gap: '8px' }}>
-            <button onClick={() => { setEditNodeData({...selectedNode, authors: selectedNode.authors || [], tags: selectedNode.tags || []}); setIsEditingNode(true); }} style={{ padding: '8px 16px', color: '#1e1e1e', border: 'none', borderRadius: '8px', cursor: 'pointer', fontSize: '12px', fontWeight: '600', fontFamily: '-apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif', backgroundColor: '#64c864', transition: 'all 0.2s ease' }} onMouseEnter={(e) => { e.currentTarget.style.backgroundColor = '#4ade80'; }} onMouseLeave={(e) => { e.currentTarget.style.backgroundColor = '#64c864'; }}>Edit</button>
-            <button onClick={() => handleDeleteNode(selectedNode.id)} style={{ padding: '8px 16px', backgroundColor: 'transparent', color: '#b8b8b8', border: `1px solid rgba(100, 200, 100, 0.3)`, borderRadius: '8px', cursor: 'pointer', fontSize: '12px', fontWeight: '500', fontFamily: '-apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif', transition: 'all 0.2s ease' }} onMouseEnter={(e) => { e.currentTarget.style.backgroundColor = '#252525'; e.currentTarget.style.color = '#dc4444'; }} onMouseLeave={(e) => { e.currentTarget.style.backgroundColor = 'transparent'; e.currentTarget.style.color = '#b8b8b8'; }}>Delete</button>
-            <button onClick={() => setSelectedNode(null)} style={{ padding: '8px 16px', backgroundColor: 'transparent', color: '#b8b8b8', border: `1px solid rgba(100, 200, 100, 0.3)`, borderRadius: '8px', cursor: 'pointer', fontSize: '12px', fontWeight: '500', fontFamily: '-apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif', transition: 'all 0.2s ease' }} onMouseEnter={(e) => { e.currentTarget.style.backgroundColor = '#252525'; e.currentTarget.style.color = '#e8e8e8'; }} onMouseLeave={(e) => { e.currentTarget.style.backgroundColor = 'transparent'; e.currentTarget.style.color = '#b8b8b8'; }}>close</button>
-          </div>
-          <div style={{ marginTop: '16px', fontSize: '13px', lineHeight: '1.5' }}>
-            <p style={{ marginBottom: '8px', color: '#e8e8e8' }}><span style={{ fontWeight: '600', color: '#64c864' }}>author:</span> {selectedNode.authors?.join(', ') || 'no author info'}</p>
-            <p style={{ marginBottom: '8px', color: '#e8e8e8' }}><span style={{ fontWeight: '600', color: '#64c864' }}>Year:</span> {selectedNode.year || 'Unspecified'}</p>
-            <p style={{ marginBottom: '8px', color: '#e8e8e8' }}><span style={{ fontWeight: '600', color: '#64c864' }}>venue:</span> {selectedNode.venue || 'no venue info'}</p>
-            <p style={{ marginBottom: '8px', color: '#e8e8e8' }}><span style={{ fontWeight: '600', color: '#64c864' }}>abstract:</span> {selectedNode.abstract || 'no abstract info'}</p>
-            <p style={{ marginBottom: '8px', color: '#e8e8e8' }}><span style={{ fontWeight: '600', color: '#64c864' }}>citations:</span> {selectedNode.citationCount !== undefined ? selectedNode.citationCount.toLocaleString() : 'no citation info'}</p>
-            <p style={{ marginBottom: '0', color: '#e8e8e8' }}><span style={{ fontWeight: '600', color: '#64c864' }}>tags(didn't work currently):</span> {selectedNode.tags?.join(', ') || 'no tags'}</p>
-          </div>
-        </div>
-        );
-      })()}
-
-      {isEditingNode && editNodeData && (
-        <div style={{ position: 'absolute', top: '16px', right: '16px', background: '#2d2d2d', border: `1px solid rgba(100, 200, 100, 0.3)`, padding: '20px', borderRadius: '12px', boxShadow: '0 3px 12px rgba(0, 0, 0, 0.4)', width: '340px', maxHeight: '500px', overflowY: 'auto', fontFamily: '-apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif' }}>
+              fontFamily: '-apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif',
+            }}>
           <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '16px' }}>
-            <h3 style={{ margin: '0', color: '#e8e8e8', fontSize: '16px', fontWeight: '600' }}>edit paper info</h3>
+            <h3 style={{ margin: '0', color: '#e8e8e8', fontSize: '16px', fontWeight: '600' }}>Edit Paper Info</h3>
             <div style={{ display: 'flex', gap: '8px' }}>
-              <button onClick={handleSaveNodeEdit} style={{ padding: '8px 16px', color: '#1e1e1e', border: 'none', borderRadius: '8px', cursor: 'pointer', fontSize: '12px', fontWeight: '600', fontFamily: '-apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif', backgroundColor: '#64c864', transition: 'all 0.2s ease' }} onMouseEnter={(e) => { e.currentTarget.style.backgroundColor = '#4ade80'; }} onMouseLeave={(e) => { e.currentTarget.style.backgroundColor = '#64c864'; }}>儲存</button>
-              <button onClick={() => { setIsEditingNode(false); setEditNodeData(null); }} style={{ padding: '8px 16px', backgroundColor: 'transparent', color: '#b8b8b8', border: `1px solid rgba(100, 200, 100, 0.3)`, borderRadius: '8px', cursor: 'pointer', fontSize: '12px', fontWeight: '500', fontFamily: '-apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif', transition: 'all 0.2s ease' }} onMouseEnter={(e) => { e.currentTarget.style.backgroundColor = '#252525'; e.currentTarget.style.color = '#e8e8e8'; }} onMouseLeave={(e) => { e.currentTarget.style.backgroundColor = 'transparent'; e.currentTarget.style.color = '#b8b8b8'; }}>取消</button>
+              <button onClick={handleSaveNodeEdit} style={{ padding: '8px 16px', color: '#1e1e1e', border: 'none', borderRadius: '8px', cursor: 'pointer', fontSize: '12px', fontWeight: '600', fontFamily: '-apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif', backgroundColor: '#64c864', transition: 'all 0.2s ease' }} onMouseEnter={(e) => { e.currentTarget.style.backgroundColor = '#4ade80'; }} onMouseLeave={(e) => { e.currentTarget.style.backgroundColor = '#64c864'; }}>Save</button>
+              <button onClick={() => { setIsEditingNode(false); setEditNodeData(null); }} style={{ padding: '8px 16px', backgroundColor: 'transparent', color: '#b8b8b8', border: `1px solid rgba(100, 200, 100, 0.3)`, borderRadius: '8px', cursor: 'pointer', fontSize: '12px', fontWeight: '500', fontFamily: '-apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif', transition: 'all 0.2s ease' }} onMouseEnter={(e) => { e.currentTarget.style.backgroundColor = '#252525'; e.currentTarget.style.color = '#e8e8e8'; }} onMouseLeave={(e) => { e.currentTarget.style.backgroundColor = 'transparent'; e.currentTarget.style.color = '#b8b8b8'; }}>Cancel</button>
             </div>
           </div>
           <div style={{ marginBottom: '12px' }}>
@@ -1273,76 +1444,100 @@ const GraphVisualization: React.FC<GraphVisualizationProps> = ({
             <input type="text" value={editNodeData.venue || ''} onChange={(e) => setEditNodeData({...editNodeData, venue: e.target.value})} style={{ width: '100%', padding: '8px 12px', border: `1px solid rgba(100, 200, 100, 0.3)`, borderRadius: '8px', backgroundColor: '#252525', color: '#e8e8e8', fontSize: '13px', fontFamily: '-apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif' }} />
           </div>
           <div style={{ marginBottom: '12px' }}>
-            <label style={{ display: 'block', marginBottom: '6px', fontWeight: '600', color: '#64c864', fontSize: '13px' }}>citation(didn't work currently):</label>
+            <label style={{ display: 'block', marginBottom: '6px', fontWeight: '600', color: '#64c864', fontSize: '13px' }}>citation:</label>
             <input type="number" value={editNodeData.citationCount || 0} onChange={(e) => setEditNodeData({...editNodeData, citationCount: parseInt(e.target.value) || 0})} style={{ width: '100%', padding: '8px 12px', border: `1px solid rgba(100, 200, 100, 0.3)`, borderRadius: '8px', backgroundColor: '#252525', color: '#e8e8e8', fontSize: '13px', fontFamily: '-apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif' }} />
           </div>
           <div style={{ marginBottom: '0' }}>
-            <label style={{ display: 'block', marginBottom: '6px', fontWeight: '600', color: '#64c864', fontSize: '13px' }}>tags(didn't work currently):</label>
+            <label style={{ display: 'block', marginBottom: '6px', fontWeight: '600', color: '#64c864', fontSize: '13px' }}>tags:</label>
             <input type="text" value={(editNodeData.tags || []).join(', ')} onChange={(e) => setEditNodeData({...editNodeData, tags: e.target.value.split(', ').filter(t => t.trim())})} style={{ width: '100%', padding: '8px 12px', border: `1px solid rgba(100, 200, 100, 0.3)`, borderRadius: '8px', backgroundColor: '#252525', color: '#e8e8e8', fontSize: '13px', fontFamily: '-apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif' }} />
           </div>
         </div>
-      )}
+          );
+        })()}
 
-      {selectedEdge && !isEditingEdge && (() => {
-        // Calculate position to keep panel within bounds
-        const panelWidth = 500;
-        const panelMaxHeight = 400;
-        const padding = 16;
+        {/* Node info panel */}
+          {selectedNode && !isEditingNode && (() => {
+            const panelWidth = 360;
+            const panelMaxHeight = 540; // taller vertical space for node info
         const container = svgRef.current?.parentElement;
-        const containerWidth = container?.clientWidth || 1000;
         const containerHeight = container?.clientHeight || 700;
-        
-        // Position below node panel or at top if no node panel
-        let top = selectedNode ? 320 : 24;
-        let right = padding;
-        
-        // Adjust if panel would overflow
-        if (panelWidth + padding * 2 > containerWidth) {
-          right = padding;
-        }
-        
-        if (top + panelMaxHeight + padding > containerHeight) {
-          top = Math.max(padding, containerHeight - panelMaxHeight - padding);
-        }
-        
+          const maxH = Math.min(panelMaxHeight, containerHeight - 40);
         return (
         <div style={{ 
-          position: 'absolute', 
-          top: `${top}px`, 
-          right: `${right}px`, 
-          background: '#2d2d2d', 
-          border: `1px solid rgba(100, 200, 100, 0.3)`, 
-          padding: '20px', 
+              pointerEvents: 'auto',
+              background: '#1e1e1e',
+              border: '1px solid rgba(100, 200, 100, 0.3)',
+              padding: '16px',
           borderRadius: '12px', 
           boxShadow: '0 3px 12px rgba(189, 180, 211, 0.25)', 
-          maxHeight: `${Math.min(panelMaxHeight, containerHeight - top - padding)}px`, 
-          width: `${Math.min(panelWidth, containerWidth - padding * 2)}px`, 
+              width: `${panelWidth}px`,
+              maxHeight: `${maxH}px`,
           overflowY: 'auto',
           fontFamily: '"Lora", "Merriweather", "Georgia", serif',
-          zIndex: 1001
-        }}>
-          <h4 style={{ margin: '0 0 16px 0', color: '#e8e8e8', fontSize: '16px', fontWeight: '600', fontFamily: '-apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif' }}>relation info</h4>
-          <div style={{ fontSize: '13px', lineHeight: '1.5' }}>
-            <p style={{ marginBottom: '8px', color: '#e8e8e8' }}><span style={{ fontWeight: '600', color: '#64c864' }}>relation:</span> {selectedEdge.relationship}</p>
-            <p style={{ marginBottom: '8px', color: '#e8e8e8' }}><span style={{ fontWeight: '600', color: '#64c864' }}>description:</span> {selectedEdge.description}</p>
-            <p style={{ marginBottom: '8px', color: '#e8e8e8' }}><span style={{ fontWeight: '600', color: '#64c864' }}>original context:</span> {selectedEdge.evidence}</p>
-            <p style={{ marginBottom: '16px', color: '#e8e8e8' }}><span style={{ fontWeight: '600', color: '#64c864' }}>strength:</span> {selectedEdge.strength}</p>
-            <div style={{ marginTop: '16px', display: 'flex', gap: '8px', justifyContent: 'flex-end' }}>
-              <button onClick={() => { setEditEdgeData({ ...selectedEdge, source: (selectedEdge.source as Node).id, target: (selectedEdge.target as Node).id }); setIsEditingEdge(true); }} style={{ padding: '8px 16px', color: '#1e1e1e', border: 'none', borderRadius: '8px', cursor: 'pointer', fontSize: '12px', fontWeight: '600', fontFamily: '-apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif', backgroundColor: '#64c864', transition: 'all 0.2s ease' }} onMouseEnter={(e) => { e.currentTarget.style.backgroundColor = '#4ade80'; }} onMouseLeave={(e) => { e.currentTarget.style.backgroundColor = '#64c864'; }}>Edit</button>
-              <button onClick={() => setSelectedEdge(null)} style={{ padding: '8px 16px', backgroundColor: 'transparent', color: '#b8b8b8', border: `1px solid rgba(100, 200, 100, 0.3)`, borderRadius: '8px', cursor: 'pointer', fontSize: '12px', fontWeight: '500', fontFamily: '-apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif', transition: 'all 0.2s ease' }} onMouseEnter={(e) => { e.currentTarget.style.backgroundColor = '#252525'; e.currentTarget.style.color = '#e8e8e8'; }} onMouseLeave={(e) => { e.currentTarget.style.backgroundColor = 'transparent'; e.currentTarget.style.color = '#b8b8b8'; }}>Close</button>
+            }}>
+              <div style={{ display: 'flex', alignItems: 'flex-start', justifyContent: 'space-between', gap: '8px' }}>
+                <h3 style={{ margin: 0, color: '#e8e8e8', fontSize: '16px', fontWeight: '600', lineHeight: '1.4', fontFamily: '-apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif' }}>
+                  {selectedNode.title}
+                </h3>
+                <div style={{ display: 'flex', gap: '6px' }}>
+                  <button
+                    onClick={() => { setEditNodeData({...selectedNode, authors: selectedNode.authors || [], tags: selectedNode.tags || []}); setIsEditingNode(true); }}
+                    style={{ padding: '6px 10px', color: '#1e1e1e', border: 'none', borderRadius: '8px', cursor: 'pointer', fontSize: '11px', fontWeight: '700', backgroundColor: '#64c864' }}
+                  >Edit</button>
+                  <button
+                    onClick={() => handleDeleteNode(selectedNode.id)}
+                    style={{ padding: '6px 10px', backgroundColor: 'transparent', color: '#dc4444', border: '1px solid rgba(220, 68, 68, 0.5)', borderRadius: '8px', cursor: 'pointer', fontSize: '11px', fontWeight: '600' }}
+                  >Delete</button>
+                  <button
+                    onClick={() => {
+                      setSelectedNode(null);
+                      setClickedNode(null);
+                      // Also remove from selectedNodeIds to clear highlighting
+                      const newSelectedIds = new Set(selectedNodeIds);
+                      newSelectedIds.delete(selectedNode.id);
+                      setSelectedNodeIds(newSelectedIds);
+                    }}
+                    style={{ padding: '6px 10px', backgroundColor: 'transparent', color: '#b8b8b8', border: '1px solid rgba(100, 200, 100, 0.3)', borderRadius: '8px', cursor: 'pointer', fontSize: '11px', fontWeight: '600' }}
+                  >Close</button>
             </div>
           </div>
+              <div style={{ marginTop: '12px', fontSize: '13px', lineHeight: '1.5', color: '#e8e8e8' }}>
+                <p style={{ marginBottom: '8px' }}><span style={{ fontWeight: '600', color: '#64c864' }}>author:</span> {selectedNode.authors?.join(', ') || 'no author info'}</p>
+                <p style={{ marginBottom: '8px' }}><span style={{ fontWeight: '600', color: '#64c864' }}>Year:</span> {selectedNode.year || 'Unspecified'}</p>
+                <p style={{ marginBottom: '8px' }}><span style={{ fontWeight: '600', color: '#64c864' }}>venue:</span> {selectedNode.venue || 'no venue info'}</p>
+                <p style={{ marginBottom: '8px' }}><span style={{ fontWeight: '600', color: '#64c864' }}>abstract:</span> {selectedNode.abstract || 'no abstract info'}</p>
+                <p style={{ marginBottom: '8px' }}><span style={{ fontWeight: '600', color: '#64c864' }}>citations:</span> {selectedNode.citationCount !== undefined ? selectedNode.citationCount.toLocaleString() : 'no citation info'}</p>
+                <p style={{ marginBottom: '0' }}><span style={{ fontWeight: '600', color: '#64c864' }}>tags:</span> {selectedNode.tags?.join(', ') || 'no tags'}</p>
+              </div>
         </div>
         );
       })()}
 
-      {isEditingEdge && editEdgeData && (
-        <div style={{ position: 'absolute', top: '320px', right: '16px', background: '#2d2d2d', border: `1px solid rgba(100, 200, 100, 0.3)`, padding: '20px', borderRadius: '12px', maxHeight: '400px', boxShadow: '0 3px 12px rgba(0, 0, 0, 0.4)', width: '340px', fontFamily: '-apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif' }}>
+        {/* Edge edit panel - render BEFORE info panel so it appears in same position */}
+        {isEditingEdge && editEdgeData && (() => {
+          const panelWidth = 360;
+          const panelMaxHeight = 420;
+          const container = svgRef.current?.parentElement;
+          const containerHeight = container?.clientHeight || 700;
+          const maxH = Math.min(panelMaxHeight, containerHeight - 40);
+          return (
+            <div style={{
+              pointerEvents: 'auto',
+              background: '#1e1e1e',
+              border: `1px solid rgba(192, 132, 252, 0.6)`,
+              padding: '16px',
+              borderRadius: '12px',
+              boxShadow: '0 3px 12px rgba(0, 0, 0, 0.35)',
+              width: `${panelWidth}px`,
+              maxHeight: `${maxH}px`,
+              overflowY: 'auto',
+              fontFamily: '-apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif',
+            }}>
           <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '16px' }}>
             <h4 style={{ margin: '0', color: '#e8e8e8', fontSize: '16px', fontWeight: '600' }}>Edit Connection</h4>
             <div style={{ display: 'flex', gap: '8px' }}>
-              <button onClick={handleSaveEdgeEdit} style={{ padding: '8px 16px', color: '#1e1e1e', border: 'none', borderRadius: '8px', cursor: 'pointer', fontSize: '12px', fontWeight: '600', fontFamily: '-apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif', backgroundColor: '#64c864', transition: 'all 0.2s ease' }} onMouseEnter={(e) => { e.currentTarget.style.backgroundColor = '#4ade80'; }} onMouseLeave={(e) => { e.currentTarget.style.backgroundColor = '#64c864'; }}>儲存</button>
-              <button onClick={() => { setIsEditingEdge(false); setEditEdgeData(null); }} style={{ padding: '8px 16px', backgroundColor: 'transparent', color: '#b8b8b8', border: `1px solid rgba(100, 200, 100, 0.3)`, borderRadius: '8px', cursor: 'pointer', fontSize: '12px', fontWeight: '500', fontFamily: '-apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif', transition: 'all 0.2s ease' }} onMouseEnter={(e) => { e.currentTarget.style.backgroundColor = '#252525'; e.currentTarget.style.color = '#e8e8e8'; }} onMouseLeave={(e) => { e.currentTarget.style.backgroundColor = 'transparent'; e.currentTarget.style.color = '#b8b8b8'; }}>取消</button>
+              <button onClick={handleSaveEdgeEdit} style={{ padding: '8px 16px', color: '#1e1e1e', border: 'none', borderRadius: '8px', cursor: 'pointer', fontSize: '12px', fontWeight: '600', fontFamily: '-apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif', backgroundColor: '#64c864', transition: 'all 0.2s ease' }} onMouseEnter={(e) => { e.currentTarget.style.backgroundColor = '#4ade80'; }} onMouseLeave={(e) => { e.currentTarget.style.backgroundColor = '#64c864'; }}>Save</button>
+              <button onClick={() => { setIsEditingEdge(false); setEditEdgeData(null); }} style={{ padding: '8px 16px', backgroundColor: 'transparent', color: '#b8b8b8', border: `1px solid rgba(100, 200, 100, 0.3)`, borderRadius: '8px', cursor: 'pointer', fontSize: '12px', fontWeight: '500', fontFamily: '-apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif', transition: 'all 0.2s ease' }} onMouseEnter={(e) => { e.currentTarget.style.backgroundColor = '#252525'; e.currentTarget.style.color = '#e8e8e8'; }} onMouseLeave={(e) => { e.currentTarget.style.backgroundColor = 'transparent'; e.currentTarget.style.color = '#b8b8b8'; }}>Cancel</button>
             </div>
           </div>
           <div style={{ marginBottom: '12px' }}>
@@ -1369,7 +1564,55 @@ const GraphVisualization: React.FC<GraphVisualizationProps> = ({
             <input type="number" min="0" max="1" step="0.1" value={editEdgeData.strength} onChange={(e) => setEditEdgeData({...editEdgeData, strength: parseFloat(e.target.value) || 0})} style={{ width: '100%', padding: '8px 12px', border: `1px solid rgba(100, 200, 100, 0.3)`, borderRadius: '8px', backgroundColor: '#252525', color: '#e8e8e8', fontSize: '13px', fontFamily: '-apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif' }} />
           </div>
         </div>
-      )}
+          );
+        })()}
+
+        {/* Edge info panel */}
+        {selectedEdge && !isEditingEdge && (() => {
+          const panelWidth = 360;
+          const panelMaxHeight = 420; // taller vertical space for edge info
+          const container = svgRef.current?.parentElement;
+          const containerHeight = container?.clientHeight || 700;
+          const maxH = Math.min(panelMaxHeight, containerHeight - 40);
+          return (
+            <div style={{
+              pointerEvents: 'auto',
+              background: '#1e1e1e',
+              border: '1px solid rgba(192, 132, 252, 0.6)',
+              padding: '16px',
+              borderRadius: '12px',
+              boxShadow: '0 3px 12px rgba(0, 0, 0, 0.35)',
+              width: `${panelWidth}px`,
+              maxHeight: `${maxH}px`,
+              overflowY: 'auto',
+              fontFamily: '"Lora", "Merriweather", "Georgia", serif',
+            }}>
+              <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: '8px' }}>
+                <h4 style={{ margin: '0 0 12px 0', color: '#e8e8e8', fontSize: '15px', fontWeight: '600', fontFamily: '-apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif' }}>relation info</h4>
+                <div style={{ display: 'flex', gap: '6px' }}>
+                  <button
+                    onClick={() => { setEditEdgeData({ ...selectedEdge, source: (selectedEdge.source as Node).id, target: (selectedEdge.target as Node).id }); setIsEditingEdge(true); }}
+                    style={{ padding: '6px 10px', color: '#1e1e1e', border: 'none', borderRadius: '8px', cursor: 'pointer', fontSize: '11px', fontWeight: '700', backgroundColor: '#64c864' }}
+                  >Edit</button>
+                  <button
+                    onClick={() => {
+                      setSelectedEdge(null);
+                      setClickedEdge(null);
+                    }}
+                    style={{ padding: '6px 10px', backgroundColor: 'transparent', color: '#b8b8b8', border: '1px solid rgba(192, 132, 252, 0.6)', borderRadius: '8px', cursor: 'pointer', fontSize: '11px', fontWeight: '600' }}
+                  >Close</button>
+                </div>
+              </div>
+              <div style={{ fontSize: '13px', lineHeight: '1.5', color: '#e8e8e8' }}>
+                <p style={{ marginBottom: '8px' }}><span style={{ fontWeight: '600', color: '#d8b4fe' }}>relation:</span> {selectedEdge.relationship}</p>
+                <p style={{ marginBottom: '8px' }}><span style={{ fontWeight: '600', color: '#d8b4fe' }}>description:</span> {selectedEdge.description}</p>
+                <p style={{ marginBottom: '8px' }}><span style={{ fontWeight: '600', color: '#d8b4fe' }}>original context:</span> {selectedEdge.evidence}</p>
+                <p style={{ marginBottom: '0' }}><span style={{ fontWeight: '600', color: '#d8b4fe' }}>strength:</span> {selectedEdge.strength}</p>
+              </div>
+            </div>
+          );
+        })()}
+      </div>
     </div>
   );
 };

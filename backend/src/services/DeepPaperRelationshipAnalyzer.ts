@@ -22,6 +22,8 @@ export interface DeepPaperContext {
   year: string;
   abstract: string;
   venue?: string;
+  url?: string; // 新增：論文 URL
+  arxivId?: string; // 新增：arXiv ID
   citationCount?: number; // 新增：引用次數
   
   // 結構化內容
@@ -192,6 +194,8 @@ export class DeepPaperRelationshipAnalyzer {
       year: paperMetadata.year,
       abstract: paperMetadata.abstract || '',
       venue: paperMetadata.venue,
+      url: paperMetadata.url, // 新增：論文 URL
+      arxivId: paperMetadata.arxivId, // 新增：arXiv ID
       citationCount: paperMetadata.citationCount, // 新增：引用次數
       structuredContent,
       citationAnalysis

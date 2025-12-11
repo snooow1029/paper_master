@@ -1,0 +1,11 @@
+# Ignore backend and other files not needed for Vercel deployment
+backend/
+grobid-*/
+node_modules/
+*.log
+*.sqlite
+*.db
+.env
+.env.local
+.vercel/
+

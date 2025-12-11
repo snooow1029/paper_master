@@ -11,9 +11,15 @@ import {
   Divider,
   CircularProgress,
   IconButton,
+  Button,
+  Dialog,
+  DialogTitle,
+  DialogContent,
+  DialogContentText,
+  DialogActions,
 } from '@mui/material';
-import { Close as CloseIcon } from '@mui/icons-material';
-import { getSessions, Session } from '../services/sessionService';
+import { Close as CloseIcon, Delete as DeleteIcon, DeleteOutline as DeleteOutlineIcon } from '@mui/icons-material';
+import { getSessions, deleteSession, deleteAllSessions, Session } from '../services/sessionService';
 import { getCurrentUser } from '../utils/auth';
 
 interface HistorySidebarProps {
@@ -27,6 +33,9 @@ export default function HistorySidebar({ open, onClose, onSelectSession }: Histo
   const [loading, setLoading] = useState(false);
   const [user, setUser] = useState<any>(null);
   const [selectedSessionId, setSelectedSessionId] = useState<string | null>(null);
+  const [deleteDialogOpen, setDeleteDialogOpen] = useState(false);
+  const [sessionToDelete, setSessionToDelete] = useState<string | null>(null);
+  const [deleteAllDialogOpen, setDeleteAllDialogOpen] = useState(false);
 
   useEffect(() => {
     if (open) {
@@ -34,6 +43,18 @@ export default function HistorySidebar({ open, onClose, onSelectSession }: Histo
       loadSessions();
     }
   }, [open]);
+
+  // Listen for session saved event to reload the list
+  useEffect(() => {
+    const handleSessionSaved = () => {
+      loadSessions();
+    };
+
+    window.addEventListener('sessionSaved', handleSessionSaved);
+    return () => {
+      window.removeEventListener('sessionSaved', handleSessionSaved);
+    };
+  }, []);
 
   const loadUser = async () => {
     try {
@@ -89,6 +110,49 @@ export default function HistorySidebar({ open, onClose, onSelectSession }: Histo
       hour: '2-digit',
       minute: '2-digit',
     });
+  };
+
+  const handleDeleteClick = (e: React.MouseEvent, sessionId: string) => {
+    e.stopPropagation(); // Prevent triggering the list item click
+    setSessionToDelete(sessionId);
+    setDeleteDialogOpen(true);
+  };
+
+  const handleDeleteConfirm = async () => {
+    if (!sessionToDelete) return;
+    
+    try {
+      await deleteSession(sessionToDelete);
+      // Remove from local state
+      setSessions(sessions.filter(s => s.id !== sessionToDelete));
+      // If the deleted session was selected, clear selection
+      if (selectedSessionId === sessionToDelete) {
+        setSelectedSessionId(null);
+      }
+    } catch (error) {
+      console.error('Failed to delete session:', error);
+      alert('删除失败，请重试');
+    } finally {
+      setDeleteDialogOpen(false);
+      setSessionToDelete(null);
+    }
+  };
+
+  const handleDeleteAllClick = () => {
+    setDeleteAllDialogOpen(true);
+  };
+
+  const handleDeleteAllConfirm = async () => {
+    try {
+      await deleteAllSessions();
+      setSessions([]);
+      setSelectedSessionId(null);
+    } catch (error) {
+      console.error('Failed to delete all sessions:', error);
+      alert('删除失败，请重试');
+    } finally {
+      setDeleteAllDialogOpen(false);
+    }
   };
 
   return (
@@ -159,6 +223,29 @@ export default function HistorySidebar({ open, onClose, onSelectSession }: Histo
           </>
         )}
 
+        {/* Delete All Button */}
+        {sessions.length > 0 && (
+          <Box sx={{ mb: 2 }}>
+            <Button
+              fullWidth
+              variant="outlined"
+              color="error"
+              startIcon={<DeleteOutlineIcon />}
+              onClick={handleDeleteAllClick}
+              sx={{
+                borderColor: '#f44336',
+                color: '#f44336',
+                '&:hover': {
+                  borderColor: '#d32f2f',
+                  backgroundColor: 'rgba(244, 67, 54, 0.1)',
+                },
+              }}
+            >
+              Delete All Records
+            </Button>
+          </Box>
+        )}
+
         {/* Sessions List */}
         {loading ? (
           <Box sx={{ display: 'flex', justifyContent: 'center', p: 4 }}>
@@ -171,13 +258,33 @@ export default function HistorySidebar({ open, onClose, onSelectSession }: Histo
         ) : (
           <List>
             {sessions.map((session) => (
-              <ListItem key={session.id} disablePadding>
+              <ListItem 
+                key={session.id} 
+                disablePadding
+                secondaryAction={
+                  <IconButton
+                    edge="end"
+                    aria-label="delete"
+                    onClick={(e) => handleDeleteClick(e, session.id)}
+                    sx={{
+                      color: '#b8b8b8',
+                      '&:hover': {
+                        color: '#f44336',
+                        backgroundColor: 'rgba(244, 67, 54, 0.1)',
+                      },
+                    }}
+                  >
+                    <DeleteIcon fontSize="small" />
+                  </IconButton>
+                }
+              >
                 <ListItemButton
                   onClick={() => handleSessionClick(session.id)}
                   selected={selectedSessionId === session.id}
                   sx={{
                     mb: 1,
                     borderRadius: 1,
+                    pr: 6, // Add padding for delete button
                     '&.Mui-selected': {
                       backgroundColor: 'rgba(100, 200, 100, 0.2)',
                       '&:hover': {
@@ -207,6 +314,60 @@ export default function HistorySidebar({ open, onClose, onSelectSession }: Histo
           </List>
         )}
       </Box>
+
+      {/* Delete Confirmation Dialog */}
+      <Dialog
+        open={deleteDialogOpen}
+        onClose={() => setDeleteDialogOpen(false)}
+        PaperProps={{
+          sx: {
+            backgroundColor: '#2d2d2d',
+            color: '#e8e8e8',
+          },
+        }}
+      >
+        <DialogTitle>Confirm Delete</DialogTitle>
+        <DialogContent>
+          <DialogContentText sx={{ color: '#b8b8b8' }}>
+            Are you sure you want to delete this record? This action cannot be undone.
+          </DialogContentText>
+        </DialogContent>
+        <DialogActions>
+          <Button onClick={() => setDeleteDialogOpen(false)} sx={{ color: '#e8e8e8' }}>
+            Cancel
+          </Button>
+          <Button onClick={handleDeleteConfirm} color="error" variant="contained">
+            Delete
+          </Button>
+        </DialogActions>
+      </Dialog>
+
+      {/* Delete All Confirmation Dialog */}
+      <Dialog
+        open={deleteAllDialogOpen}
+        onClose={() => setDeleteAllDialogOpen(false)}
+        PaperProps={{
+          sx: {
+            backgroundColor: '#2d2d2d',
+            color: '#e8e8e8',
+          },
+        }}
+      >
+        <DialogTitle>Confirm Delete All Records</DialogTitle>
+        <DialogContent>
+          <DialogContentText sx={{ color: '#b8b8b8' }}>
+            Are you sure you want to delete all history records? This action cannot be undone. {sessions.length} record(s) will be deleted.
+          </DialogContentText>
+        </DialogContent>
+        <DialogActions>
+          <Button onClick={() => setDeleteAllDialogOpen(false)} sx={{ color: '#e8e8e8' }}>
+            Cancel
+          </Button>
+          <Button onClick={handleDeleteAllConfirm} color="error" variant="contained">
+            Delete All
+          </Button>
+        </DialogActions>
+      </Dialog>
     </Drawer>
   );
 }

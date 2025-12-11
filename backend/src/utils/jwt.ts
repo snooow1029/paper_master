@@ -26,6 +26,7 @@ export function verifyToken(token: string): JWTPayload | null {
     const decoded = jwt.verify(token, JWT_SECRET) as JWTPayload;
     return decoded;
   } catch (error) {
+    console.error('❌ JWT verification error:', error instanceof Error ? error.message : error);
     return null;
   }
 }

@@ -84,11 +84,23 @@ declare -a PIDS=()
 cleanup() {
   echo
   echo "🛑 Shutting down background services..."
+  
+  # First, try graceful shutdown of tracked PIDs
   for pid in "${PIDS[@]}"; do
     if kill -0 "$pid" >/dev/null 2>&1; then
       echo "  Stopping PID $pid..."
       kill "$pid" >/dev/null 2>&1 || true
-      wait "$pid" 2>/dev/null || true
+    fi
+  done
+  
+  # Wait a bit for graceful shutdown
+  sleep 2
+  
+  # Force kill any remaining tracked PIDs
+  for pid in "${PIDS[@]}"; do
+    if kill -0 "$pid" >/dev/null 2>&1; then
+      echo "  Force killing PID $pid..."
+      kill -9 "$pid" >/dev/null 2>&1 || true
     fi
   done
   
@@ -102,10 +114,13 @@ cleanup() {
   kill_processes_by_pattern "gradlew.*run" "GROBID" 2>/dev/null || true
   
   # Clean up any remaining processes on our ports (with error handling)
-  local ollama_port="${OLLAMA_HOST##*:}"
-  if [[ -n "$ollama_port" ]]; then
-    kill_port_if_in_use "$ollama_port" "Ollama" 2>/dev/null || true
+  if [[ "$NEED_OLLAMA" == "true" ]]; then
+    local ollama_port="${OLLAMA_HOST##*:}"
+    if [[ -n "$ollama_port" ]]; then
+      kill_port_if_in_use "$ollama_port" "Ollama" 2>/dev/null || true
+    fi
   fi
+  
   if [[ "$NEED_LITELLM" == "true" ]] && [[ -n "$LITELLM_PORT" ]]; then
     kill_port_if_in_use "$LITELLM_PORT" "LiteLLM" 2>/dev/null || true
   fi
@@ -118,14 +133,23 @@ cleanup() {
   fi
   kill_port_if_in_use "$grobid_port" "GROBID" 2>/dev/null || true
   
-  # Clean up Node.js processes (npm run dev, nodemon, etc.)
+  # Clean up Node.js processes (npm run dev, nodemon, ts-node, etc.)
   echo "  Cleaning up Node.js processes..."
   kill_processes_by_pattern "npm.*run.*dev" "npm dev" 2>/dev/null || true
   kill_processes_by_pattern "nodemon" "nodemon" 2>/dev/null || true
+  kill_processes_by_pattern "ts-node" "ts-node" 2>/dev/null || true
+  kill_processes_by_pattern "concurrently" "concurrently" 2>/dev/null || true
+  
+  # Clean up vite dev server
+  kill_processes_by_pattern "vite" "vite" 2>/dev/null || true
+  
+  # Kill any remaining processes on backend and frontend ports
+  kill_port_if_in_use "8080" "Backend" 2>/dev/null || true
+  kill_port_if_in_use "3000" "Frontend" 2>/dev/null || true
   
   echo "✅ Cleanup complete."
 }
-trap cleanup EXIT
+trap cleanup EXIT INT TERM
 
 # Check for required commands based on LLM_TYPE
 if [[ "$NEED_OLLAMA" == "true" ]]; then
@@ -333,6 +357,33 @@ fi
 
 echo
 echo "All background services are up."
+echo "Checking and installing dependencies..."
+echo
+
+# Check and install root dependencies
+if [[ ! -d "${ROOT_DIR}/node_modules" ]]; then
+  echo "📦 Installing root dependencies..."
+  cd "$ROOT_DIR"
+  npm install
+fi
+
+# Check and install backend dependencies
+if [[ ! -d "${BACKEND_DIR}/node_modules" ]]; then
+  echo "📦 Installing backend dependencies..."
+  cd "$BACKEND_DIR"
+  npm install
+fi
+
+# Check and install frontend dependencies
+FRONTEND_DIR="${ROOT_DIR}/frontend"
+if [[ ! -d "${FRONTEND_DIR}/node_modules" ]]; then
+  echo "📦 Installing frontend dependencies..."
+  cd "$FRONTEND_DIR"
+  npm install
+fi
+
+echo "✅ Dependencies check complete."
+echo
 echo "Starting Paper Master dev servers..."
 echo
 

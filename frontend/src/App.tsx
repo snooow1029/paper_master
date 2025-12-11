@@ -1,5 +1,5 @@
 import React from 'react';
-import { BrowserRouter as Router, Routes, Route } from 'react-router-dom';
+import { BrowserRouter as Router, Routes, Route, Navigate } from 'react-router-dom';
 import { ThemeProvider, createTheme } from '@mui/material/styles';
 import CssBaseline from '@mui/material/CssBaseline';
 import { Box, Typography } from '@mui/material';
@@ -7,6 +7,8 @@ import MainLayout from './components/Layout/MainLayout';
 import PaperGraphPage from './pages/PaperGraphPage';
 import EnhancedGraphVisualization from './components/EnhancedGraphVisualization';
 import LoginHandler from './components/LoginHandler';
+import LoginPage from './pages/LoginPage';
+import { isAuthenticated } from './utils/auth';
 
 const theme = createTheme({
   palette: {
@@ -34,6 +36,14 @@ function TestPage() {
       </Typography>
     </Box>
   );
+}
+
+// Protected Route component
+function ProtectedRoute({ children }: { children: React.ReactNode }) {
+  if (!isAuthenticated()) {
+    return <Navigate to="/login" replace />;
+  }
+  return <>{children}</>;
 }
 
 function App() {
@@ -71,15 +81,62 @@ function App() {
       <CssBaseline />
       <Router>
         <LoginHandler />
-        <MainLayout onSelectSession={handleSessionSelect}>
-          <Routes>
-            <Route path="/test" element={<TestPage />} />
-            <Route path="/" element={<PaperGraphPage setSessionHandler={setSessionHandler} />} />
-            <Route path="/graph" element={<PaperGraphPage setSessionHandler={setSessionHandler} />} />
-            <Route path="/new-graph" element={<PaperGraphPage setSessionHandler={setSessionHandler} />} />
-            <Route path="/enhanced-analysis" element={<EnhancedGraphVisualization />} />
-          </Routes>
-        </MainLayout>
+        <Routes>
+          {/* Public route - Login page */}
+          <Route path="/login" element={<LoginPage />} />
+          
+          {/* Protected routes - require authentication */}
+          <Route
+            path="/"
+            element={
+              <ProtectedRoute>
+                <MainLayout onSelectSession={handleSessionSelect}>
+                  <PaperGraphPage setSessionHandler={setSessionHandler} />
+                </MainLayout>
+              </ProtectedRoute>
+            }
+          />
+          <Route
+            path="/graph"
+            element={
+              <ProtectedRoute>
+                <MainLayout onSelectSession={handleSessionSelect}>
+                  <PaperGraphPage setSessionHandler={setSessionHandler} />
+                </MainLayout>
+              </ProtectedRoute>
+            }
+          />
+          <Route
+            path="/new-graph"
+            element={
+              <ProtectedRoute>
+                <MainLayout onSelectSession={handleSessionSelect}>
+                  <PaperGraphPage setSessionHandler={setSessionHandler} />
+                </MainLayout>
+              </ProtectedRoute>
+            }
+          />
+          <Route
+            path="/enhanced-analysis"
+            element={
+              <ProtectedRoute>
+                <MainLayout onSelectSession={handleSessionSelect}>
+                  <EnhancedGraphVisualization />
+                </MainLayout>
+              </ProtectedRoute>
+            }
+          />
+          <Route
+            path="/test"
+            element={
+              <ProtectedRoute>
+                <MainLayout onSelectSession={handleSessionSelect}>
+                  <TestPage />
+                </MainLayout>
+              </ProtectedRoute>
+            }
+          />
+        </Routes>
       </Router>
     </ThemeProvider>
   );

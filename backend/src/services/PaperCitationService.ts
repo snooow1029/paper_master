@@ -17,9 +17,11 @@ export interface PriorWork {
   year?: string;
   abstract?: string;
   url?: string;
+  arxivId?: string; // arXiv ID
   citationContext?: string; // 引用上下文
   relationship?: string; // 关系类型（如 builds_on, extends）
   citationCount?: number; // 总引用数（从 Semantic Scholar 获取）
+  section?: string; // 引用所在的章节（如 Introduction, Related Work）
 }
 
 export interface DerivativeWork {
@@ -29,6 +31,7 @@ export interface DerivativeWork {
   year?: string;
   abstract?: string;
   url?: string;
+  arxivId?: string; // arXiv ID
   citationCount?: number;
 }
 
@@ -203,6 +206,7 @@ export class PaperCitationService {
           year: citation.year,
           citationContext: citation.context,
           url: inferredUrl,
+          section: citation.section, // Include section information for filtering
         };
 
         // 尝试从 Semantic Scholar 获取 citationCount
@@ -251,11 +255,40 @@ export class PaperCitationService {
         if (citationCount === undefined || citationCount === null) {
           try {
             console.log(`🔍 [Method 2] Searching by title and authors for: "${citation.title?.substring(0, 50)}..." (authors: ${citation.authors?.slice(0, 2).join(', ') || 'none'}, year: ${citation.year || 'none'})`);
-            const searchResult = await SemanticScholarService.queryByTitleAndAuthors(
+            // Only use first few authors for search to avoid query being too long
+            const authorsForSearch = citation.authors && citation.authors.length > 0 
+              ? citation.authors.slice(0, 3) // Use first 3 authors only
+              : [];
+            
+            let searchResult = await SemanticScholarService.queryByTitleAndAuthors(
               citation.title || '',
-              citation.authors || [],
+              authorsForSearch,
               citation.year
             );
+            
+            // 如果搜索失败，尝试只用标题搜索（不带作者）
+            if (!searchResult.success && citation.title) {
+              console.log(`🔍 [Method 2b] Title+author search failed, trying title-only search...`);
+              searchResult = await SemanticScholarService.queryByTitleAndAuthors(
+                citation.title,
+                [], // No authors
+                citation.year
+              );
+            }
+            
+            // 如果还是失败，尝试只用标题的前几个关键词
+            if (!searchResult.success && citation.title) {
+              console.log(`🔍 [Method 2c] Title-only search failed, trying with first 5 keywords...`);
+              const titleWords = citation.title.split(/\s+/).filter(w => w.length > 2).slice(0, 5).join(' ');
+              if (titleWords.length > 10) {
+                searchResult = await SemanticScholarService.queryByTitleAndAuthors(
+                  titleWords,
+                  [],
+                  citation.year
+                );
+              }
+            }
+            
             if (searchResult.success && searchResult.data) {
               // 如果搜索成功，尝试从返回的数据中提取 arxiv ID
               let extractedArxivId: string | null = null;
@@ -296,38 +329,60 @@ export class PaperCitationService {
               }
               
               // 获取 citationCount
+              // 首先记录搜索返回的 citationCount（但不立即使用，优先使用paperId查询的结果）
+              let searchCitationCount: number | undefined = undefined;
               if (searchResult.data.citationCount !== undefined && searchResult.data.citationCount !== null) {
-                citationCount = searchResult.data.citationCount;
-                console.log(`✅ Found citation count via title search: ${citationCount} for "${citation.title?.substring(0, 50)}..."`);
-              } else {
-                // 如果标题搜索找到了匹配但没有 citationCount，尝试多种方式查询
-                if (searchResult.data.paperId || searchResult.data.url) {
-                  console.log(`🔍 Found match but no citationCount, attempting multiple query methods...`);
-                  
-                  // 方法1: 直接用 paperId 查询（最可靠的方法）
-                  if (searchResult.data.paperId && (citationCount === undefined || citationCount === null)) {
-                    try {
-                      console.log(`🔍 [Method 1] Querying directly by paperId: ${searchResult.data.paperId}`);
-                      const paperIdResult = await SemanticScholarService.queryByPaperId(searchResult.data.paperId);
-                      if (paperIdResult.success && paperIdResult.data?.citationCount !== undefined && paperIdResult.data.citationCount !== null) {
-                        citationCount = paperIdResult.data.citationCount;
-                        console.log(`✅ Found citation count via direct paperId query: ${citationCount}`);
-                      }
-                    } catch (error) {
-                      console.debug(`Failed to query by paperId:`, error instanceof Error ? error.message : 'Unknown error');
+                searchCitationCount = searchResult.data.citationCount;
+                console.log(`ℹ️  Title search returned citationCount: ${searchCitationCount} for "${citation.title?.substring(0, 50)}..."`);
+              }
+              
+              // 🚀 FIXED: Always query by paperId if available, even if search returned citationCount
+              // This is the most reliable method - paperId queries always return accurate citationCount
+              // Even if search returned 0, we should verify with paperId query since it's more reliable
+              if (searchResult.data.paperId) {
+                try {
+                  console.log(`🔍 [Method 2d] Querying by paperId (most reliable method): ${searchResult.data.paperId}`);
+                  const paperIdResult = await SemanticScholarService.queryByPaperId(searchResult.data.paperId);
+                  if (paperIdResult.success && paperIdResult.data?.citationCount !== undefined && paperIdResult.data.citationCount !== null) {
+                    // Always use paperId result if available, as it's most reliable
+                    citationCount = paperIdResult.data.citationCount;
+                    console.log(`✅ Found citation count via paperId query: ${citationCount} for "${citation.title?.substring(0, 50)}..."`);
+                  } else {
+                    // If paperId query didn't return citationCount, fall back to search result
+                    if (searchCitationCount !== undefined && searchCitationCount !== null) {
+                      citationCount = searchCitationCount;
+                      console.log(`ℹ️  Using citationCount from search (paperId query didn't return it): ${citationCount}`);
                     }
                   }
+                } catch (error) {
+                  console.debug(`Failed to query by paperId:`, error instanceof Error ? error.message : 'Unknown error');
+                  // If paperId query fails, use the citationCount from search if available
+                  if (searchCitationCount !== undefined && searchCitationCount !== null) {
+                    citationCount = searchCitationCount;
+                    console.log(`ℹ️  Using citationCount from search (paperId query failed): ${citationCount}`);
+                }
+                }
+              } else if (searchCitationCount !== undefined && searchCitationCount !== null) {
+                // If no paperId available, use search result
+                citationCount = searchCitationCount;
+                console.log(`✅ Using citation count from title search: ${citationCount} (no paperId available)`);
+              }
+              
+              // 如果还是没有找到 citationCount，尝试其他方法（只有当是undefined/null时才尝试，不包括0）
+              if (citationCount === undefined || citationCount === null) {
+                if (searchResult.data.paperId || searchResult.data.url) {
+                  console.log(`🔍 Found match but citationCount still missing, attempting additional query methods...`);
                   
-                  // 方法2: 如果有 URL，尝试提取 arxiv ID 并查询
-                  if (searchResult.data.url && (citationCount === undefined || citationCount === null)) {
+                  // 方法1: 如果有 URL，尝试提取 arxiv ID 并查询
+                  if (searchResult.data.url) {
                     try {
                       const urlArxivId = this.extractArxivId(searchResult.data.url);
                       if (urlArxivId) {
-                        console.log(`🔍 [Method 2] Extracted arXiv ID from URL: ${urlArxivId}`);
+                        console.log(`🔍 [Method 2e] Extracted arXiv ID from URL: ${urlArxivId}`);
                         const directResult = await SemanticScholarService.queryByArxivId(urlArxivId);
                         if (directResult.success && directResult.data?.citationCount !== undefined && directResult.data.citationCount !== null) {
                           citationCount = directResult.data.citationCount;
-                          console.log(`✅ Found citation count via direct arXiv query: ${citationCount}`);
+                          console.log(`✅ Found citation count via URL arXiv query: ${citationCount}`);
                         }
                       }
                     } catch (error) {
@@ -335,12 +390,12 @@ export class PaperCitationService {
                     }
                   }
                   
-                  // 方法3: 如果 paperId 本身是 arXiv ID 格式，尝试查询
+                  // 方法2: 如果 paperId 本身是 arXiv ID 格式，尝试查询
                   if ((citationCount === undefined || citationCount === null) && searchResult.data.paperId) {
                     try {
                       const paperIdArxivId = this.extractArxivId(searchResult.data.paperId);
                       if (paperIdArxivId && paperIdArxivId !== arxivId) {
-                        console.log(`🔍 [Method 3] Extracted arXiv ID from paperId: ${paperIdArxivId}`);
+                        console.log(`🔍 [Method 2f] Extracted arXiv ID from paperId: ${paperIdArxivId}`);
                         const directResult = await SemanticScholarService.queryByArxivId(paperIdArxivId);
                         if (directResult.success && directResult.data?.citationCount !== undefined && directResult.data.citationCount !== null) {
                           citationCount = directResult.data.citationCount;
@@ -351,14 +406,115 @@ export class PaperCitationService {
                       console.debug(`Failed to query via arXiv paperId:`, error instanceof Error ? error.message : 'Unknown error');
                     }
                   }
+              
+                  // 方法3: 如果仍然没有citationCount，再次尝试用paperId查询（可能之前查询时API暂时失败）
+                  if ((citationCount === undefined || citationCount === null) && searchResult.data.paperId) {
+                    try {
+                      console.log(`🔍 [Method 2h] Retrying paperId query as fallback: ${searchResult.data.paperId}`);
+                      // Wait a bit before retry to avoid rate limiting
+                      await new Promise(resolve => setTimeout(resolve, 1000));
+                      const retryResult = await SemanticScholarService.queryByPaperId(searchResult.data.paperId);
+                      if (retryResult.success && retryResult.data?.citationCount !== undefined && retryResult.data.citationCount !== null) {
+                        citationCount = retryResult.data.citationCount;
+                        console.log(`✅ Found citation count via paperId retry: ${citationCount}`);
+                      }
+                    } catch (error) {
+                      console.debug(`Retry paperId query failed:`, error instanceof Error ? error.message : 'Unknown error');
+                    }
+                  }
+                  
+                  // 方法4: 尝试使用更宽松的标题搜索（只匹配主要关键词）
+                  if ((citationCount === undefined || citationCount === null) && citation.title) {
+                    try {
+                      console.log(`🔍 [Method 2i] Trying very loose title search with main keywords only...`);
+                      // Extract first 3-4 significant words (length > 3)
+                      const mainKeywords = citation.title.split(/\s+/)
+                        .filter(w => w.length > 3)
+                        .slice(0, 4)
+                        .join(' ');
+                      if (mainKeywords.length > 10) {
+                        await new Promise(resolve => setTimeout(resolve, 1500)); // Rate limit delay
+                        const looseSearchResult = await SemanticScholarService.queryByTitleAndAuthors(
+                          mainKeywords,
+                          [],
+                          citation.year
+                        );
+                        if (looseSearchResult.success && looseSearchResult.data) {
+                          // Check if this is likely the same paper
+                          const normalizedTitle1 = (citation.title || '').toLowerCase().replace(/[^\w\s]/g, ' ').replace(/\s+/g, ' ').trim();
+                          const normalizedTitle2 = (looseSearchResult.data.title || '').toLowerCase().replace(/[^\w\s]/g, ' ').replace(/\s+/g, ' ').trim();
+                          const titleSimilarity = this.calculateTitleSimilarity(normalizedTitle1, normalizedTitle2);
+                          
+                          if (titleSimilarity > 0.3) { // Accept if similarity > 30%
+                            // Try paperId query first (most reliable)
+                            if (looseSearchResult.data.paperId) {
+                              try {
+                                await new Promise(resolve => setTimeout(resolve, 1000));
+                                const loosePaperIdResult = await SemanticScholarService.queryByPaperId(looseSearchResult.data.paperId);
+                                if (loosePaperIdResult.success && loosePaperIdResult.data?.citationCount !== undefined && loosePaperIdResult.data.citationCount !== null) {
+                                  citationCount = loosePaperIdResult.data.citationCount;
+                                  console.log(`✅ Found citation count via loose search + paperId: ${citationCount}`);
+                                }
+                              } catch (error) {
+                                console.debug(`Loose search paperId query failed:`, error instanceof Error ? error.message : 'Unknown error');
+                              }
+                            }
+                            
+                            // Fallback to search result citationCount
+                            if ((citationCount === undefined || citationCount === null) && looseSearchResult.data.citationCount !== undefined && looseSearchResult.data.citationCount !== null) {
+                              citationCount = looseSearchResult.data.citationCount;
+                              console.log(`✅ Found citation count via loose search: ${citationCount}`);
+                            }
+                          }
+                        }
+                      }
+                    } catch (error) {
+                      console.debug(`Loose title search failed:`, error instanceof Error ? error.message : 'Unknown error');
+                    }
+                  }
                 }
               }
               
+              // 如果还是没有找到，记录警告（但不包括0，因为0可能是真实的）
               if (citationCount === undefined || citationCount === null) {
-                console.warn(`⚠️  Title search found match but no citationCount for "${citation.title?.substring(0, 50)}..."`);
+                console.warn(`⚠️  [Prior Works] All methods failed to find citationCount for "${citation.title?.substring(0, 50)}..." (paperId: ${searchResult.data?.paperId || 'none'}, URL: ${searchResult.data?.url || 'none'})`);
+              } else if (citationCount === 0) {
+                console.log(`ℹ️  [Prior Works] CitationCount is 0 for "${citation.title?.substring(0, 50)}..." (this may be accurate for very new papers)`);
               }
             } else {
-              console.warn(`⚠️  Title search failed for "${citation.title?.substring(0, 50)}...": ${searchResult.error || 'No match found'}`);
+              console.warn(`⚠️  [Prior Works] Title search failed for "${citation.title?.substring(0, 50)}...": ${searchResult.error || 'No match found'}`);
+              
+              // 如果所有搜索都失败，尝试最后一次：只用标题的前几个词（更宽松的搜索）
+              if (citation.title && citation.title.length > 10) {
+                try {
+                  console.log(`🔍 [Method 2g] Last attempt: searching with first 3-5 words of title...`);
+                  const titleWords = citation.title.split(/\s+/).filter(w => w.length > 2).slice(0, 5).join(' ');
+                  if (titleWords.length > 10) {
+                    const lastAttemptResult = await SemanticScholarService.queryByTitleAndAuthors(
+                      titleWords,
+                      [],
+                      citation.year
+                    );
+                    if (lastAttemptResult.success && lastAttemptResult.data) {
+                      // 如果找到了，尝试用 paperId 查询
+                      // Only try paperId query if citationCount is still undefined/null (not if it's 0)
+                      if (lastAttemptResult.data.paperId && (citationCount === undefined || citationCount === null)) {
+                        try {
+                          const lastPaperIdResult = await SemanticScholarService.queryByPaperId(lastAttemptResult.data.paperId);
+                          if (lastPaperIdResult.success && lastPaperIdResult.data?.citationCount !== undefined && lastPaperIdResult.data.citationCount !== null) {
+                            citationCount = lastPaperIdResult.data.citationCount;
+                            console.log(`✅ Found citation count via last attempt paperId query: ${citationCount}`);
+                          }
+                        } catch (error) {
+                          console.debug(`Last attempt paperId query failed:`, error instanceof Error ? error.message : 'Unknown error');
+                        }
+                      }
+                    }
+                  }
+                } catch (error) {
+                  console.debug(`Last attempt search failed:`, error instanceof Error ? error.message : 'Unknown error');
+                }
+              }
             }
           } catch (error) {
             const errorMsg = error instanceof Error ? error.message : 'Unknown error';
@@ -366,21 +522,159 @@ export class PaperCitationService {
           }
         }
         
-        // 设置 citationCount（如果有的话）
-        if (citationCount !== undefined && citationCount !== null) {
-          priorWork.citationCount = citationCount;
-          console.log(`✅ [${index + 1}/${result.citations.length}] Citation count for "${citation.title?.substring(0, 50)}...": ${citationCount}`);
+        // Ensure authors is a proper array with all authors
+        let finalAuthors: string[] = [];
+        if (citation.authors && Array.isArray(citation.authors)) {
+          finalAuthors = citation.authors.map((author: any) => {
+            if (typeof author === 'string') {
+              return author;
+            } else if (author && typeof author === 'object' && author.name) {
+              return author.name;
+            }
+            return String(author || '');
+          }).filter((name: string) => name && name.length > 0);
+        }
+        
+        // 🚀 FINAL FALLBACK: If still no citationCount, try one last comprehensive attempt
+        // This is a last resort before giving up
+        if (citationCount === undefined || citationCount === null) {
+          console.log(`🔍 [Method FINAL] Final comprehensive attempt to find citationCount for "${citation.title?.substring(0, 50)}..."`);
+          
+          // Strategy 1: Try searching with just the first significant words (very loose match)
+          if (citation.title && citation.title.length > 15) {
+            try {
+              const firstWords = citation.title.split(/\s+/).filter(w => w.length > 4).slice(0, 3).join(' ');
+              if (firstWords.length > 10) {
+                console.log(`🔍 [Method FINAL-1] Trying with first significant words: "${firstWords}"`);
+                await new Promise(resolve => setTimeout(resolve, 2000)); // Longer delay for final attempt
+                
+                const finalSearchResult = await SemanticScholarService.queryByTitleAndAuthors(
+                  firstWords,
+                  citation.authors?.slice(0, 1) || [], // Just first author
+                  citation.year
+                );
+                
+                if (finalSearchResult.success && finalSearchResult.data) {
+                  // If we got a paperId, always try querying it
+                  if (finalSearchResult.data.paperId) {
+                    try {
+                      await new Promise(resolve => setTimeout(resolve, 1500));
+                      const finalPaperIdResult = await SemanticScholarService.queryByPaperId(finalSearchResult.data.paperId);
+                      if (finalPaperIdResult.success && finalPaperIdResult.data?.citationCount !== undefined && finalPaperIdResult.data.citationCount !== null) {
+                        citationCount = finalPaperIdResult.data.citationCount;
+                        console.log(`✅ [Method FINAL] Found citationCount via comprehensive search: ${citationCount}`);
+                      }
+                    } catch (error) {
+                      console.debug(`Final paperId query failed:`, error instanceof Error ? error.message : 'Unknown error');
+                    }
+                  }
+                  
+                  // If still no citationCount, use the search result (even if 0)
+                  if ((citationCount === undefined || citationCount === null) && finalSearchResult.data.citationCount !== undefined && finalSearchResult.data.citationCount !== null) {
+                    citationCount = finalSearchResult.data.citationCount;
+                    console.log(`✅ [Method FINAL] Using citationCount from comprehensive search: ${citationCount}`);
+                  }
+                }
+              }
+            } catch (error) {
+              console.debug(`Final comprehensive search failed:`, error instanceof Error ? error.message : 'Unknown error');
+            }
+          }
+          
+          // Strategy 2: If we have any URL or identifier, try extracting and querying one more time
+          if ((citationCount === undefined || citationCount === null) && (priorWork.url || arxivId)) {
+            const urlToCheck = priorWork.url || (arxivId ? `arxiv.org/abs/${arxivId}` : null);
+            if (urlToCheck) {
+              try {
+                console.log(`🔍 [Method FINAL-2] Final attempt with URL/identifier: ${urlToCheck}`);
+                await new Promise(resolve => setTimeout(resolve, 2000));
+                
+                const finalUrlArxivId = this.extractArxivId(urlToCheck);
+                if (finalUrlArxivId) {
+                  const finalArxivResult = await SemanticScholarService.queryByArxivId(finalUrlArxivId);
+                  if (finalArxivResult.success && finalArxivResult.data?.citationCount !== undefined && finalArxivResult.data.citationCount !== null) {
+                    citationCount = finalArxivResult.data.citationCount;
+                    console.log(`✅ [Method FINAL] Found citationCount via final arXiv query: ${citationCount}`);
+                  }
+                }
+              } catch (error) {
+                console.debug(`Final URL/arXiv query failed:`, error instanceof Error ? error.message : 'Unknown error');
+              }
+            }
+          }
+        }
+        
+        // 🚀 FINAL DECISION: If we STILL don't have a citationCount, drop this entry (do not return it)
+        const finalCitationCount = (citationCount !== undefined && citationCount !== null && typeof citationCount === 'number' && citationCount >= 0)
+          ? citationCount
+          : undefined;
+        
+        if (finalCitationCount === undefined) {
+          console.warn(`⚠️  [Prior Works ${index + 1}/${result.citations.length}] Dropping citation; citationCount not found after all attempts: "${citation.title?.substring(0, 50)}..."`);
+          return null; // Filter out later
+        }
+        
+        // Log final data for debugging
+        if (finalCitationCount === 0) {
+          console.log(`ℹ️  [Prior Works ${index + 1}/${result.citations.length}] CitationCount is 0 for "${citation.title?.substring(0, 50)}..." (may be accurate for new papers)`);
         } else {
-          console.warn(`⚠️  [${index + 1}/${result.citations.length}] Could not find citation count for: "${citation.title?.substring(0, 50)}..." (arXiv ID: ${arxivId || 'none'})`);
+          console.log(`✅ [Prior Works ${index + 1}/${result.citations.length}] Citation count for "${citation.title?.substring(0, 50)}...": ${finalCitationCount}`);
+        }
+        
+        // Log author information
+        if (finalAuthors.length > 0) {
+          console.log(`📝 [Prior Works ${index + 1}/${result.citations.length}] Authors (${finalAuthors.length}): First: ${finalAuthors[0]}, Last: ${finalAuthors[finalAuthors.length - 1]}`);
+        } else {
+          console.warn(`⚠️  [Prior Works ${index + 1}/${result.citations.length}] No authors found for "${citation.title?.substring(0, 50)}..."`);
         }
 
-        return priorWork;
+        return {
+          ...priorWork,
+          authors: finalAuthors, // Ensure complete author list
+          citationCount: finalCitationCount, // Must be a number here
+        };
       });
 
-      const priorWorks = await Promise.all(priorWorksPromises);
-      const withCitationCount = priorWorks.filter(w => w.citationCount !== undefined && w.citationCount !== null).length;
-      console.log(`📊 Prior works summary: ${priorWorks.length} total, ${withCitationCount} with citationCount`);
-      return priorWorks;
+      const priorWorks = (await Promise.all(priorWorksPromises))
+        .filter((w): w is PriorWork & { citationCount: number } => !!w && typeof w.citationCount === 'number');
+      const withCitationCount = priorWorks.filter(w => w.citationCount > 0).length;
+      console.log(`📊 Prior works summary: ${priorWorks.length} total (after dropping missing citationCount), ${withCitationCount} with citationCount > 0`);
+      
+      // 🚀 FIXED: Only return relevant papers (from Introduction/Related Work sections)
+      // Filter to only include papers that were cited in relevant sections
+      // Also prioritize papers with higher citationCount
+      const relevantPriorWorks = priorWorks.filter(work => {
+        // Only include papers from Introduction/Related Work sections
+        // If section is unknown, we'll keep it but prioritize those with known sections
+        const section = work.section?.toLowerCase() || '';
+        const isRelevantSection = 
+          section.includes('introduction') ||
+          section.includes('related work') ||
+          section.includes('related works') ||
+          section.includes('literature review') ||
+          section.includes('background') ||
+          section.includes('prior work') ||
+          section.includes('prior works') ||
+          section.includes('motivation');
+        
+        // Keep if it's from a relevant section, or if section is unknown (fallback)
+        return isRelevantSection || !section || section === 'unknown';
+      });
+      
+      // Sort by citationCount (desc) to prioritize highly cited papers
+      relevantPriorWorks.sort((a, b) => {
+        const countA = a.citationCount || 0;
+        const countB = b.citationCount || 0;
+        return countB - countA;
+      });
+      
+      // Limit to top 50 most relevant and highly cited papers
+      const topPriorWorks = relevantPriorWorks.slice(0, 50);
+      
+      console.log(`📊 Filtered to ${topPriorWorks.length} relevant prior works (from Introduction/Related Work sections, sorted by citationCount)`);
+      console.log(`   Removed ${priorWorks.length - topPriorWorks.length} papers from other sections`);
+      
+      return topPriorWorks;
     } catch (error) {
       console.error('Error getting prior works from URL:', error);
       throw error;
@@ -394,6 +688,7 @@ export class PaperCitationService {
    */
   async getDerivativeWorksFromUrl(paperUrl: string): Promise<DerivativeWork[]> {
     try {
+      console.log(`\n🔍 [Derivative Works] Starting search for: ${paperUrl}`);
       let citingPapers: Array<{
         id: string;
         title: string;
@@ -407,12 +702,54 @@ export class PaperCitationService {
       // 方法1: 尝试通过 arXiv ID 查找
       const arxivId = this.extractArxivId(paperUrl);
       if (arxivId) {
-        console.log(`🔍 [Derivative Works] Trying to find citing papers via arXiv ID: ${arxivId}`);
-        citingPapers = await SemanticScholarService.getAllCitingPapers(arxivId, {
-          maxResults: 500, // 增加默认值到500篇引用论文
-          pagesToFetch: 10, // 增加默认值到10页（每页100篇）
-          fetchAllAvailable: false // 如果论文引用数很多，可以考虑设为 true 来获取所有
-        });
+        console.log(`🔍 [Derivative Works] Method 1: Trying to find citing papers via arXiv ID: ${arxivId}`);
+        try {
+          // First, try to get paperId from arXiv ID
+          const arxivResult = await SemanticScholarService.queryByArxivId(arxivId);
+          if (arxivResult.success && arxivResult.data?.paperId) {
+            const paperId = arxivResult.data.paperId;
+            const sourcePaperYear = arxivResult.data.year || undefined;
+            console.log(`✅ [Derivative Works] Found paperId ${paperId} from arXiv ID ${arxivId}`);
+            console.log(`📅 [Derivative Works] Source paper year: ${sourcePaperYear || 'unknown'}`);
+            
+            // 🚀 FIXED: Use time distribution strategy to ensure papers from ALL years
+            // Fetch many pages to get papers from different time periods
+            citingPapers = await SemanticScholarService.getAllCitingPapersWithTimeDistribution(
+              paperId,
+              {
+                maxResults: 100, // Limit results but ensure year diversity
+                pagesToFetch: 15, // Fetch many pages to ensure year coverage (2018-2025 = 8 years)
+                sourcePaperYear: sourcePaperYear,
+                preferWithCitations: true // Prioritize papers with citations
+              }
+            );
+            console.log(`📊 [Derivative Works] Method 1 result: Found ${citingPapers.length} citing papers via paperId`);
+          } else {
+            // Fallback: try with arXiv ID directly
+            console.log(`⚠️  [Derivative Works] Could not get paperId, trying with arXiv ID directly...`);
+            // For arXiv ID fallback, we need to get paperId first
+            const fallbackArxivResult = await SemanticScholarService.queryByArxivId(arxivId);
+            if (fallbackArxivResult.success && fallbackArxivResult.data?.paperId) {
+              const fallbackPaperId = fallbackArxivResult.data.paperId;
+              const fallbackYear = fallbackArxivResult.data.year || undefined;
+              citingPapers = await SemanticScholarService.getAllCitingPapersWithTimeDistribution(
+                fallbackPaperId,
+                {
+                  maxResults: 100,
+                  pagesToFetch: 15, // Fetch many pages for year coverage
+                  sourcePaperYear: fallbackYear,
+                  preferWithCitations: true
+                }
+              );
+              console.log(`📊 [Derivative Works] Method 1 fallback result: Found ${citingPapers.length} citing papers via paperId`);
+            }
+          }
+        } catch (error) {
+          console.error(`❌ [Derivative Works] Method 1 failed:`, error instanceof Error ? error.message : error);
+          // Continue to try other methods
+        }
+      } else {
+        console.warn(`⚠️  [Derivative Works] Could not extract arXiv ID from URL: ${paperUrl}`);
       }
 
       // 方法2: 如果没有结果或结果太少，尝试通过其他方式找到 paperId
@@ -424,20 +761,41 @@ export class PaperCitationService {
           if (semanticScholarMatch && semanticScholarMatch[1]) {
             const paperId = semanticScholarMatch[1];
             console.log(`🔍 [Derivative Works] Found paperId from Semantic Scholar URL: ${paperId}`);
-            citingPapers = await SemanticScholarService.getAllCitingPapers(paperId, {
-              maxResults: 500,
-              pagesToFetch: 10,
-              fetchAllAvailable: false
-            });
+            // 首先尝试获取原始论文的年份，以便后续进行时间分布
+            let sourcePaperYear: number | null = null;
+            try {
+              const sourcePaperInfo = await SemanticScholarService.queryByPaperId(paperId);
+              if (sourcePaperInfo.success && sourcePaperInfo.data?.year) {
+                sourcePaperYear = sourcePaperInfo.data.year;
+                console.log(`📅 [Derivative Works] Source paper year: ${sourcePaperYear}`);
+              }
+            } catch (error) {
+              console.warn(`⚠️  Could not get source paper year:`, error);
+            }
+
+            // 策略1：优先按 citationCount 排序获取有引用的论文
+            // 先获取按 citationCount 排序的结果（获取更多论文以便筛选）
+            citingPapers = await SemanticScholarService.getAllCitingPapersWithTimeDistribution(
+              paperId,
+              {
+                maxResults: 100,
+                pagesToFetch: 15, // Fetch many pages for comprehensive year coverage
+                sourcePaperYear: sourcePaperYear || undefined,
+                preferWithCitations: true
+              }
+            );
           }
           
           // 方法2b: 如果还是没有结果，尝试通过 GROBID 提取论文信息，然后搜索 Semantic Scholar 获取 paperId
           if (citingPapers.length === 0) {
-            console.log(`🔍 [Derivative Works] Trying to extract paper info via GROBID and search Semantic Scholar...`);
+            console.log(`🔍 [Derivative Works] Method 2b: Trying to extract paper info via GROBID and search Semantic Scholar...`);
             try {
               const grobidResult = await this.grobidService.extractCitationsWithContextFiltered(paperUrl);
               if (grobidResult.success && grobidResult.paperTitle) {
-                console.log(`🔍 [Derivative Works] Extracted title: "${grobidResult.paperTitle}"`);
+                console.log(`🔍 [Derivative Works] GROBID extracted title: "${grobidResult.paperTitle}"`);
+                console.log(`🔍 [Derivative Works] GROBID extracted authors: ${grobidResult.paperAuthors?.slice(0, 3).join(', ') || 'none'}`);
+                console.log(`🔍 [Derivative Works] GROBID extracted year: ${grobidResult.paperYear || 'none'}`);
+                
                 const searchResult = await SemanticScholarService.queryByTitleAndAuthors(
                   grobidResult.paperTitle,
                   grobidResult.paperAuthors || [],
@@ -447,14 +805,45 @@ export class PaperCitationService {
                 if (searchResult.success && searchResult.data?.paperId) {
                   const paperId = searchResult.data.paperId;
                   console.log(`✅ [Derivative Works] Found paperId via title search: ${paperId}`);
-                  citingPapers = await SemanticScholarService.getAllCitingPapers(paperId, {
-                    maxResults: 200,
-                    pagesToFetch: 3
-                  });
+                  // 使用时间分布策略
+                  citingPapers = await SemanticScholarService.getAllCitingPapersWithTimeDistribution(
+                    paperId,
+                    {
+                      maxResults: 100,
+                      pagesToFetch: 15, // Fetch many pages for year coverage
+                      preferWithCitations: true
+                    }
+                  );
+                  console.log(`📊 [Derivative Works] Method 2b result: Found ${citingPapers.length} citing papers via paperId`);
+                } else {
+                  console.warn(`⚠️  [Derivative Works] Title search failed: ${searchResult.error || 'No match found'}`);
+                  // 方法2c: 如果标题搜索失败，尝试直接用 URL 查询（可能是 Semantic Scholar URL）
+                  if (paperUrl.includes('semanticscholar.org')) {
+                    const ssMatch = paperUrl.match(/semanticscholar\.org\/paper\/([^\/\?]+)/i);
+                    if (ssMatch && ssMatch[1]) {
+                      console.log(`🔍 [Derivative Works] Method 2c: Trying direct Semantic Scholar paperId from URL`);
+                      try {
+                        // 使用时间分布策略
+                        citingPapers = await SemanticScholarService.getAllCitingPapersWithTimeDistribution(
+                          ssMatch[1],
+                          {
+                            maxResults: 100,
+                            pagesToFetch: 15, // Fetch many pages for year coverage
+                            preferWithCitations: true
+                          }
+                        );
+                        console.log(`📊 [Derivative Works] Method 2c result: Found ${citingPapers.length} citing papers`);
+                      } catch (error) {
+                        console.error(`❌ [Derivative Works] Method 2c failed:`, error instanceof Error ? error.message : error);
+                      }
+                    }
+                  }
                 }
+              } else {
+                console.warn(`⚠️  [Derivative Works] GROBID extraction failed or no title found`);
               }
             } catch (error) {
-              console.debug(`Failed to find paperId via GROBID extraction:`, error instanceof Error ? error.message : 'Unknown error');
+              console.error(`❌ [Derivative Works] GROBID extraction error:`, error instanceof Error ? error.message : 'Unknown error');
             }
           }
         } catch (error) {
@@ -468,30 +857,90 @@ export class PaperCitationService {
         return [];
       }
 
-      console.log(`📊 [Derivative Works] Found ${citingPapers.length} potential citing papers, processing citationCount...`);
+      // Filter out papers with future years BEFORE processing citationCount
+      const currentYear = new Date().getFullYear();
+      const validCitingPapers = citingPapers.filter((paper: any) => {
+        if (!paper.year) return true; // Keep papers without year
+        const year = parseInt(paper.year);
+        if (isNaN(year)) return true; // Keep papers with invalid year format
+        // Strictly filter out future years
+        if (year > currentYear) {
+          console.log(`⚠️  [Derivative Works] Filtering out paper with future year ${year}: "${paper.title?.substring(0, 50)}..."`);
+          return false;
+        }
+        // Also filter out obviously wrong years
+        if (year < 1900 || year > currentYear) {
+          return false;
+        }
+        return true;
+      });
+
+      if (validCitingPapers.length < citingPapers.length) {
+        console.log(`📅 [Derivative Works] Filtered out ${citingPapers.length - validCitingPapers.length} papers with invalid/future years`);
+      }
+
+      console.log(`📊 [Derivative Works] Found ${validCitingPapers.length} valid citing papers (after year filtering), processing citationCount...`);
       
-      // If many papers are missing citationCount, try to fetch them individually using paperId
-      const derivativeWorksPromises = citingPapers.map(async (paper: any) => {
+      // Strategy: First try batch query for all papers, then individual queries ONLY for missing ones
+      const paperIdsToQuery = validCitingPapers
+        .filter((p: any) => p.id && (p.citationCount === undefined || p.citationCount === null || p.citationCount === 0))
+        .map((p: any) => p.id);
+      
+      console.log(`📦 [Derivative Works] Batch querying citationCount for ${paperIdsToQuery.length} papers (out of ${validCitingPapers.length} total)...`);
+      let batchCitationCounts = new Map<string, number>();
+      
+      if (paperIdsToQuery.length > 0) {
+        try {
+          batchCitationCounts = await SemanticScholarService.batchQueryPapers(paperIdsToQuery);
+          console.log(`✅ [Derivative Works] Batch query found citationCount for ${batchCitationCounts.size}/${paperIdsToQuery.length} papers`);
+        } catch (error) {
+          console.error(`❌ [Derivative Works] Batch query failed:`, error instanceof Error ? error.message : 'Unknown error');
+          // Continue with individual queries as fallback
+        }
+      } else {
+        console.log(`ℹ️  [Derivative Works] All papers already have citationCount, skipping batch query`);
+      }
+      
+      // Process papers: use batch results if available, otherwise try individual queries
+      const derivativeWorksPromises = validCitingPapers.map(async (paper: any) => {
         let citationCount = paper.citationCount;
         
-        // If citationCount is missing, try multiple methods to fetch it
-        if ((citationCount === undefined || citationCount === null)) {
-          // Method 1: Use paperId to query individual paper details directly
-          if (paper.id) {
-            try {
-              console.log(`🔍 [Derivative Works] Querying by paperId: ${paper.id} for "${paper.title?.substring(0, 40)}..."`);
-              const paperIdResult = await SemanticScholarService.queryByPaperId(paper.id);
-              if (paperIdResult.success && paperIdResult.data?.citationCount !== undefined && paperIdResult.data.citationCount !== null) {
-                citationCount = paperIdResult.data.citationCount;
-                console.log(`✅ [Derivative Works] Found citationCount via paperId query: ${citationCount} for "${paper.title?.substring(0, 40)}..."`);
-              }
-            } catch (error) {
-              console.debug(`Failed to fetch citationCount via paperId for ${paper.id}:`, error instanceof Error ? error.message : 'Unknown error');
-            }
+        // First, check if batch query found the citationCount
+        if (paper.id && batchCitationCounts.has(paper.id)) {
+          const batchCount = batchCitationCounts.get(paper.id)!;
+          citationCount = batchCount; // Use batch result even if 0 (it's from API)
+          if (batchCount > 0) {
+            console.log(`✅ [Derivative Works] Found citationCount via batch query: ${citationCount} for "${paper.title?.substring(0, 40)}..."`);
+          } else {
+            console.log(`ℹ️  [Derivative Works] Batch query returned citationCount=0 for "${paper.title?.substring(0, 40)}..." (paperId: ${paper.id})`);
           }
-          
-          // Method 2: If still not found and we have URL, try extracting arXiv ID from URL
-          if ((citationCount === undefined || citationCount === null) && paper.url) {
+        } else if (paper.id && (citationCount === undefined || citationCount === null || citationCount === 0)) {
+          // Only query individually if batch query didn't find it
+          // Skip individual queries if we already have a value from batch (even if 0)
+          try {
+            console.log(`🔍 [Derivative Works] Batch query missed, trying individual paperId query: ${paper.id} for "${paper.title?.substring(0, 40)}..."`);
+            const paperIdResult = await SemanticScholarService.queryByPaperId(paper.id);
+            if (paperIdResult.success && paperIdResult.data) {
+              if (paperIdResult.data.citationCount !== undefined && paperIdResult.data.citationCount !== null) {
+                const queriedCount = paperIdResult.data.citationCount;
+                citationCount = queriedCount;
+                if (queriedCount > 0) {
+                  console.log(`✅ [Derivative Works] Found citationCount via individual paperId query: ${citationCount} for "${paper.title?.substring(0, 40)}..."`);
+                } else {
+                  console.log(`ℹ️  [Derivative Works] Individual paperId query returned citationCount=0 for "${paper.title?.substring(0, 40)}..."`);
+                }
+              }
+            }
+          } catch (error) {
+            console.debug(`Failed to fetch citationCount via paperId for ${paper.id}:`, error instanceof Error ? error.message : 'Unknown error');
+          }
+        }
+        
+        // If citationCount is still missing or 0, try additional methods
+        // Note: We check for 0 because Semantic Scholar API might incorrectly return 0 for papers that actually have citations
+        if ((citationCount === undefined || citationCount === null || citationCount === 0)) {
+          // Method 2: If we have URL, try extracting arXiv ID from URL
+          if (paper.url) {
             try {
               const urlArxivId = this.extractArxivId(paper.url);
               if (urlArxivId) {
@@ -508,17 +957,33 @@ export class PaperCitationService {
           }
           
           // Method 3: If still not found, try searching by title + authors + year (fallback)
-          if ((citationCount === undefined || citationCount === null) && paper.title && paper.authors && paper.authors.length > 0) {
+          if ((citationCount === undefined || citationCount === null || citationCount === 0) && paper.title && paper.authors && paper.authors.length > 0) {
             try {
               console.log(`🔍 [Derivative Works] Searching by title+authors+year for "${paper.title?.substring(0, 40)}..."`);
               const searchResult = await SemanticScholarService.queryByTitleAndAuthors(
                 paper.title,
-                paper.authors,
+                paper.authors.slice(0, 3), // Use first 3 authors only
                 paper.year
               );
-              if (searchResult.success && searchResult.data?.citationCount !== undefined && searchResult.data.citationCount !== null) {
-                citationCount = searchResult.data.citationCount;
-                console.log(`✅ [Derivative Works] Found citationCount via title search: ${citationCount} for "${paper.title?.substring(0, 40)}..."`);
+              if (searchResult.success && searchResult.data) {
+                // If search found a match, try using its paperId to query
+                if (searchResult.data.paperId && (citationCount === undefined || citationCount === null || citationCount === 0)) {
+                  try {
+                    const searchPaperIdResult = await SemanticScholarService.queryByPaperId(searchResult.data.paperId);
+                    if (searchPaperIdResult.success && searchPaperIdResult.data?.citationCount !== undefined && searchPaperIdResult.data.citationCount !== null) {
+                      citationCount = searchPaperIdResult.data.citationCount;
+                      console.log(`✅ [Derivative Works] Found citationCount via search+paperId: ${citationCount} for "${paper.title?.substring(0, 40)}..."`);
+                    }
+                  } catch (error) {
+                    console.debug(`Failed to query search result paperId:`, error instanceof Error ? error.message : 'Unknown error');
+                  }
+                }
+                
+                // Also try using search result's citationCount directly
+                if ((citationCount === undefined || citationCount === null || citationCount === 0) && searchResult.data.citationCount !== undefined && searchResult.data.citationCount !== null) {
+                  citationCount = searchResult.data.citationCount;
+                  console.log(`✅ [Derivative Works] Found citationCount via title search: ${citationCount} for "${paper.title?.substring(0, 40)}..."`);
+                }
               }
             } catch (error) {
               console.debug(`Failed to search by title for derivative work:`, error instanceof Error ? error.message : 'Unknown error');
@@ -526,14 +991,38 @@ export class PaperCitationService {
           }
         }
         
+        // Ensure authors is a proper array with all authors
+        let finalAuthors: string[] = [];
+        if (paper.authors && Array.isArray(paper.authors)) {
+          finalAuthors = paper.authors.map((author: any) => {
+            if (typeof author === 'string') {
+              return author;
+            } else if (author && typeof author === 'object' && author.name) {
+              return author.name;
+            }
+            return String(author || '');
+          }).filter((name: string) => name && name.length > 0);
+        }
+        
+        // Ensure citationCount is a valid number (not undefined/null)
+        // If still not found, set to 0 (not undefined) so frontend can handle it properly
+        const finalCitationCount = (citationCount !== undefined && citationCount !== null && typeof citationCount === 'number' && citationCount >= 0)
+          ? citationCount
+          : 0; // Use 0 instead of undefined/null
+        
+        // Log final data for debugging
+        if (finalCitationCount === 0) {
+          console.warn(`⚠️  [Derivative Works] Final citationCount is 0 for "${paper.title?.substring(0, 50)}..." (paperId: ${paper.id || 'none'})`);
+        }
+        
         return {
           id: paper.id || `paper_${Date.now()}_${Math.random()}`,
           title: paper.title || 'Unknown Title',
-          authors: paper.authors || [],
-          year: paper.year,
-          abstract: paper.abstract,
-          url: paper.url,
-          citationCount: citationCount,
+          authors: finalAuthors, // Ensure complete author list
+          year: paper.year || undefined,
+          abstract: paper.abstract || undefined,
+          url: paper.url || undefined,
+          citationCount: finalCitationCount, // Always a number (0 if all methods failed)
         };
       });
       
@@ -555,6 +1044,22 @@ export class PaperCitationService {
       // 如果 Semantic Scholar 失败，返回空数组
       return [];
     }
+  }
+
+  /**
+   * Calculate title similarity between two titles
+   * Returns a value between 0 and 1, where 1 is identical
+   */
+  private calculateTitleSimilarity(title1: string, title2: string): number {
+    if (!title1 || !title2) return 0;
+    
+    const words1 = new Set(title1.toLowerCase().split(/\s+/).filter(w => w.length > 2));
+    const words2 = new Set(title2.toLowerCase().split(/\s+/).filter(w => w.length > 2));
+    
+    const intersection = new Set([...words1].filter(x => words2.has(x)));
+    const union = new Set([...words1, ...words2]);
+    
+    return union.size > 0 ? intersection.size / union.size : 0;
   }
 
   /**

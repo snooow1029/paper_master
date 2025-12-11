@@ -92,9 +92,18 @@ export class SessionController {
         return res.status(404).json({ error: 'Session not found or has no graph data' });
       }
 
+      // Extract priorWorks and derivativeWorks from graphData if available
+      const priorWorks = (graphData as any).priorWorks || {};
+      const derivativeWorks = (graphData as any).derivativeWorks || {};
+
       res.json({
         sessionId: id,
-        graphData,
+        graphData: {
+          nodes: graphData.nodes,
+          edges: graphData.edges
+        },
+        priorWorks,
+        derivativeWorks
       });
     } catch (error) {
       console.error('Error getting session graph data:', error);
@@ -135,7 +144,7 @@ export class SessionController {
     try {
       const userId = (req as any).user?.id;
       const { id } = req.params;
-      const { graphData } = req.body;
+      const { graphData, originalPapers } = req.body;
       
       if (!userId) {
         return res.status(401).json({ error: 'Not authenticated' });
@@ -146,7 +155,7 @@ export class SessionController {
       }
 
       const analysisSaveService = new AnalysisSaveService();
-      const result = await analysisSaveService.updateSessionGraph(id, userId, graphData as GraphData);
+      const result = await analysisSaveService.updateSessionGraph(id, userId, graphData as GraphData, originalPapers);
 
       res.json({
         session: {
@@ -187,6 +196,25 @@ export class SessionController {
     } catch (error) {
       console.error('Error deleting session:', error);
       res.status(500).json({ error: 'Failed to delete session' });
+    }
+  }
+
+  /**
+   * Delete all sessions for current user
+   */
+  async deleteAllSessions(req: Request, res: Response) {
+    try {
+      const userId = (req as any).user?.id;
+      
+      if (!userId) {
+        return res.status(401).json({ error: 'Not authenticated' });
+      }
+
+      const deletedCount = await this.sessionService.deleteAllSessions(userId);
+      res.json({ success: true, deletedCount });
+    } catch (error) {
+      console.error('Error deleting all sessions:', error);
+      res.status(500).json({ error: 'Failed to delete all sessions' });
     }
   }
 }

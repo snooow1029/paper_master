@@ -107,7 +107,7 @@ export class AnalysisController {
         return res.status(401).json({ error: 'Not authenticated' });
       }
 
-      const { urls, title, graphData, papers } = req.body;
+      const { urls, title, graphData, papers, originalPapers } = req.body;
 
       if (!urls || !Array.isArray(urls) || urls.length === 0) {
         return res.status(400).json({ error: 'URLs array is required' });
@@ -157,7 +157,8 @@ export class AnalysisController {
         userId,
         title, // Pass title (or undefined to auto-generate from first paper)
         paperData,
-        graphData as GraphData
+        graphData as GraphData,
+        originalPapers // Pass priorWorks and derivativeWorks if available
       );
 
       res.json({

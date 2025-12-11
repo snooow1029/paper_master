@@ -1,6 +1,7 @@
 import React, { useState, useEffect, useRef, useCallback } from 'react';
 import GraphVisualization from '../components/GraphVisualization';
 import AnalysisProgress from '../components/AnalysisProgress';
+import ResizableSidebar from '../components/ResizableSidebar';
 import { GraphData } from '../types/graph';
 import { isAuthenticated } from '../utils/auth';
 import { useLoadSession } from '../hooks/useLoadSession';
@@ -25,21 +26,14 @@ import {
   Book as BookIcon,
   ExpandMore as ExpandMoreIcon,
   ExpandLess as ExpandLessIcon,
+  AddCircleOutline as AddCircleOutlineIcon,
+  Settings as SettingsIcon,
+  FileCopy as CopyIcon,
 } from '@mui/icons-material';
 
 // Use relative path if VITE_API_BASE_URL is not set (development proxy)
 const API_BASE_URL = import.meta.env.VITE_API_BASE_URL || (import.meta.env.DEV ? '' : 'http://localhost:8080');
 
-interface Citation {
-  title: string;
-  authors?: string[];
-  venue?: string;
-  year?: string;
-  arxivId?: string;
-  url?: string;
-  doi?: string;
-  relevanceScore?: number;
-}
 
 
 
@@ -68,6 +62,7 @@ const PaperGraphPage: React.FC<PaperGraphPageProps> = ({ setSessionHandler }) =>
   // SSE connection ref
   const eventSourceRef = useRef<EventSource | null>(null);
   const saveTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const previousNodeCountRef = useRef<number>(0);
   
   // Cleanup timeout on unmount and save pending changes
   useEffect(() => {
@@ -83,7 +78,7 @@ const PaperGraphPage: React.FC<PaperGraphPageProps> = ({ setSessionHandler }) =>
   const [_originalPaperUrls, setOriginalPaperUrls] = useState<string[]>([]);
   
   // 多模式切换状态（类似 Connected Papers）
-  type ViewMode = 'graph' | 'prior-works' | 'derivative-works';
+  type ViewMode = 'graph' | 'prior-works' | 'derivative-works' | 'citation-extractor';
   const [viewMode, setViewMode] = useState<ViewMode>('graph');
   
   // Prior Works 和 Derivative Works 数据（从分析结果中获取）
@@ -117,11 +112,62 @@ const PaperGraphPage: React.FC<PaperGraphPageProps> = ({ setSessionHandler }) =>
   const [expansionDepth, setExpansionDepth] = useState(0);
 
   // Citation Extractor state
-  const [showCitationExtractor, setShowCitationExtractor] = useState(false);
   const [citationUrl, setCitationUrl] = useState('');
   const [isExtracting, setIsExtracting] = useState(false);
   const [citationResults, setCitationResults] = useState<string | null>(null);
-  const [showAllCitations, setShowAllCitations] = useState(false);
+  const [citationFormat, setCitationFormat] = useState<'apa' | 'ieee' | 'mla' | 'chicago' | 'plain'>('ieee');
+  const [rawCitations, setRawCitations] = useState<Array<{ title?: string; authors?: string[]; year?: string; venue?: string }>>([]);
+
+  // Helper function to robustly extract author names
+  // Handles: array of strings, array of objects, single string with separators, newlines, etc.
+  const normalizeAuthors = (authors: any): string[] => {
+    if (!authors) return [];
+    
+    // If already an array
+    if (Array.isArray(authors)) {
+      const normalized: string[] = [];
+      for (const author of authors) {
+        if (typeof author === 'string') {
+          // Check if this single element contains multiple authors separated by comma
+          // e.g., "Author1, Author2, Author3" should be split
+          const parts = author.split(/[,;\n]|(?:\s+and\s+)/i).map(s => s.trim()).filter(Boolean);
+          normalized.push(...parts);
+        } else if (author && typeof author === 'object' && author.name) {
+          // Handle object format {name: "..."}
+          normalized.push(author.name);
+        } else if (author) {
+          normalized.push(String(author));
+        }
+      }
+      return normalized;
+    }
+    
+    // If single string, split by separators
+    if (typeof authors === 'string') {
+      return authors.split(/[,;\n]|(?:\s+and\s+)/i).map(s => s.trim()).filter(Boolean);
+    }
+    
+    return [];
+  };
+
+  // Get display author (first or last) from normalized author list
+  const getDisplayAuthor = (authors: any, showFirst: boolean): string => {
+    const normalized = normalizeAuthors(authors);
+    
+    // Debug logging (only for first few items to avoid spam)
+    if (normalized.length > 0 && Math.random() < 0.05) {
+      console.log('🔍 Author Debug:', {
+        input: authors,
+        normalized: normalized,
+        first: normalized[0],
+        last: normalized[normalized.length - 1],
+        total: normalized.length
+      });
+    }
+    
+    if (normalized.length === 0) return 'Unknown';
+    return showFirst ? normalized[0] : normalized[normalized.length - 1];
+  };
 
   // Obsidian Sync state
   const [showObsidianSync, setShowObsidianSync] = useState(false);
@@ -134,8 +180,11 @@ const PaperGraphPage: React.FC<PaperGraphPageProps> = ({ setSessionHandler }) =>
   // Panel collapse state
   const [isConfigCollapsed, setIsConfigCollapsed] = useState(false);
   
-  // Overall bottom section collapse state
-  // Guide section - 改為可摺疊的側邊欄，而不是底部固定區域
+  // Sidebar width states
+  const [_leftSidebarWidth, setLeftSidebarWidth] = useState(320);
+  const [_rightSidebarWidth, setRightSidebarWidth] = useState(350);
+  
+  // Guide section - Right sidebar
   const [showGuideSidebar, setShowGuideSidebar] = useState(false);
 
   // URL management
@@ -442,6 +491,16 @@ const PaperGraphPage: React.FC<PaperGraphPageProps> = ({ setSessionHandler }) =>
         originalPapers: originalPaperIds,
       };
 
+      // Extract originalPapers data (priorWorks and derivativeWorks) from result
+      const originalPapersData = result.originalPapers && 
+        (result.originalPapers.priorWorks || result.originalPapers.derivativeWorks) 
+        ? {
+            urls: result.originalPapers.urls || paperUrls,
+            priorWorks: result.originalPapers.priorWorks,
+            derivativeWorks: result.originalPapers.derivativeWorks
+          }
+        : undefined;
+
       // Use save-result endpoint to save without re-analyzing
       // Don't pass title, let backend generate it from source paper
       const saveResponse = await fetch(`${API_BASE_URL}/api/analyses/save-result`, {
@@ -455,6 +514,7 @@ const PaperGraphPage: React.FC<PaperGraphPageProps> = ({ setSessionHandler }) =>
           // title: undefined, // Let backend generate from source paper title
           graphData: graphDataWithOriginalPapers,
           papers: papers.length > 0 ? papers : undefined,
+          originalPapers: originalPapersData, // Include priorWorks and derivativeWorks
         }),
       });
 
@@ -462,8 +522,14 @@ const PaperGraphPage: React.FC<PaperGraphPageProps> = ({ setSessionHandler }) =>
         const saveResult = await saveResponse.json();
         console.log('✅ Analysis saved to session:', saveResult.session.id);
         setCurrentSessionId(saveResult.session.id);
+        // Trigger a custom event to notify HistorySidebar to reload
+        window.dispatchEvent(new CustomEvent('sessionSaved', { 
+          detail: { sessionId: saveResult.session.id } 
+        }));
       } else {
-        console.warn('Failed to save analysis:', await saveResponse.text());
+        const errorText = await saveResponse.text();
+        console.warn('Failed to save analysis:', errorText);
+        throw new Error(`Failed to save analysis: ${errorText}`);
       }
     } catch (error) {
       console.error('Error saving analysis:', error);
@@ -499,6 +565,13 @@ const PaperGraphPage: React.FC<PaperGraphPageProps> = ({ setSessionHandler }) =>
         console.log(`⚠️ WARNING: No edges to save!`);
       }
 
+      // Prepare originalPapers data from current state
+      const originalPapersData = {
+        urls: _originalPaperUrls.length > 0 ? _originalPaperUrls : (data.nodes?.map((n: any) => n.url).filter(Boolean) || []),
+        priorWorks: Object.keys(_priorWorksData).length > 0 ? _priorWorksData : undefined,
+        derivativeWorks: Object.keys(_derivativeWorksData).length > 0 ? _derivativeWorksData : undefined,
+      };
+
       const updateResponse = await fetch(`${API_BASE_URL}/api/sessions/${currentSessionId}/update-graph`, {
         method: 'PUT',
         headers: {
@@ -507,6 +580,7 @@ const PaperGraphPage: React.FC<PaperGraphPageProps> = ({ setSessionHandler }) =>
         },
         body: JSON.stringify({
           graphData: data,
+          originalPapers: (originalPapersData.priorWorks || originalPapersData.derivativeWorks) ? originalPapersData : undefined,
         }),
       });
 
@@ -524,29 +598,317 @@ const PaperGraphPage: React.FC<PaperGraphPageProps> = ({ setSessionHandler }) =>
   };
 
   // Use hook to load session data when currentSessionId changes
-  const { graphData: loadedGraphData, loading: sessionLoading } = useLoadSession(currentSessionId);
+  const { graphData: loadedGraphData, priorWorks: loadedPriorWorks, derivativeWorks: loadedDerivativeWorks, loading: sessionLoading } = useLoadSession(currentSessionId);
 
   // Update graphData when session is loaded via hook
+  // IMPORTANT: Only load from hook if graphData is null/empty or we're explicitly loading a session
+  // This prevents clearing graph data after analysis completes
   useEffect(() => {
+    // Only load from hook if:
+    // 1. We have loadedGraphData
+    // 2. We have a currentSessionId (explicit session selection)
+    // 3. AND (graphData is null OR we're switching to a different session)
+    // DO NOT load if graphData exists and is marked as new analysis
     if (loadedGraphData && currentSessionId) {
-      console.log(`\n🟣 ========== PAPERGRAPHPAGE RECEIVE DATA ==========`);
-      console.log(`📥 Session ID: ${currentSessionId}`);
-      console.log(`📥 Received graphData: ${loadedGraphData.nodes.length} nodes, ${loadedGraphData.edges.length} edges`);
-      if (loadedGraphData.edges.length > 0) {
-        console.log(`📥 Edges sample (first 3):`, loadedGraphData.edges.slice(0, 3).map((e: any) => ({
-          id: e.id,
-          source: e.source,
-          target: e.target,
-          label: e.label
-        })));
-      } else {
-        console.log(`⚠️ WARNING: No edges in loaded graphData!`);
-      }
+      // Check if this is a new analysis result (should not be overwritten)
+      const isNewAnalysis = (graphData as any)?.__isNewAnalysis === true;
+      const isDifferentSession = graphData && (graphData as any).__sessionId && (graphData as any).__sessionId !== currentSessionId;
+      const isEmpty = !graphData || graphData.nodes.length === 0;
+      
+      // Only load if: empty OR different session (explicit session switch)
+      // DO NOT load if: it's a new analysis (just completed)
+      const shouldLoad = isEmpty || (isDifferentSession && !isNewAnalysis);
+      
+      if (shouldLoad) {
+        console.log(`\n🟣 ========== PAPERGRAPHPAGE RECEIVE DATA ==========`);
+        console.log(`📥 Session ID: ${currentSessionId}`);
+        console.log(`📥 Received graphData: ${loadedGraphData.nodes.length} nodes, ${loadedGraphData.edges.length} edges`);
+        if (loadedGraphData.edges.length > 0) {
+          console.log(`📥 Edges sample (first 3):`, loadedGraphData.edges.slice(0, 3).map((e: any) => ({
+            id: e.id,
+            source: e.source,
+            target: e.target,
+            label: e.label
+          })));
+        } else {
+          console.log(`⚠️ WARNING: No edges in loaded graphData!`);
+        }
 
-      setGraphData(loadedGraphData);
-      setViewMode('graph');
+        // 检查是否有 prior/derivative works 数据（从 hook 返回的数据）
+        console.log(`📚 Checking for prior/derivative works in loaded data:`, {
+          hasLoadedPriorWorks: !!loadedPriorWorks && Object.keys(loadedPriorWorks).length > 0,
+          hasLoadedDerivativeWorks: !!loadedDerivativeWorks && Object.keys(loadedDerivativeWorks).length > 0,
+          loadedPriorWorksKeys: loadedPriorWorks ? Object.keys(loadedPriorWorks) : [],
+          loadedDerivativeWorksKeys: loadedDerivativeWorks ? Object.keys(loadedDerivativeWorks) : [],
+          loadedPriorWorksCount: loadedPriorWorks ? Object.values(loadedPriorWorks).flat().length : 0,
+          loadedDerivativeWorksCount: loadedDerivativeWorks ? Object.values(loadedDerivativeWorks).flat().length : 0
+        });
+        
+        // 优先使用 hook 返回的数据（更可靠）
+        if (loadedPriorWorks && Object.keys(loadedPriorWorks).length > 0) {
+          console.log(`📚 Using loadedPriorWorks from hook:`, loadedPriorWorks);
+          setPriorWorksData(loadedPriorWorks);
+          // 处理并设置 prior works（合并所有原始论文的 prior works）
+          const mergedPriorWorks = new Map<string, any>();
+          Object.values(loadedPriorWorks).flat().forEach((work: any) => {
+            const key = work.id || work.title || `${work.title}_${work.year}`;
+            if (!mergedPriorWorks.has(key)) {
+              mergedPriorWorks.set(key, work);
+            } else {
+              // 如果已存在，合并数据（保留 citationCount 等）
+              const existing = mergedPriorWorks.get(key);
+              mergedPriorWorks.set(key, {
+                ...existing,
+                ...work,
+                citationCount: work.citationCount ?? existing.citationCount,
+                authors: work.authors?.length > existing.authors?.length ? work.authors : existing.authors
+              });
+            }
+          });
+          setAllPriorWorks(Array.from(mergedPriorWorks.values()));
+          console.log(`✅ Loaded and merged ${mergedPriorWorks.size} prior works from history`);
+        }
+        
+        if (loadedDerivativeWorks && Object.keys(loadedDerivativeWorks).length > 0) {
+          console.log(`📚 Using loadedDerivativeWorks from hook:`, loadedDerivativeWorks);
+          setDerivativeWorksData(loadedDerivativeWorks);
+          // 处理并设置 derivative works（合并所有原始论文的 derivative works）
+          const mergedDerivativeWorks = new Map<string, any>();
+          Object.values(loadedDerivativeWorks).flat().forEach((work: any) => {
+            const key = work.id || work.title || `${work.title}_${work.year}`;
+            if (!mergedDerivativeWorks.has(key)) {
+              mergedDerivativeWorks.set(key, work);
+            } else {
+              // 如果已存在，合并数据
+              const existing = mergedDerivativeWorks.get(key);
+              mergedDerivativeWorks.set(key, {
+                ...existing,
+                ...work,
+                citationCount: work.citationCount ?? existing.citationCount,
+                authors: work.authors?.length > existing.authors?.length ? work.authors : existing.authors
+              });
+            }
+          });
+          setAllDerivativeWorks(Array.from(mergedDerivativeWorks.values()));
+          console.log(`✅ Loaded and merged ${mergedDerivativeWorks.size} derivative works from history`);
+        }
+        
+        // Fallback: 如果没有从 hook 获取到，尝试从 graphData.originalPapers 获取
+        if ((!loadedPriorWorks || Object.keys(loadedPriorWorks).length === 0) && 
+            (!loadedDerivativeWorks || Object.keys(loadedDerivativeWorks).length === 0)) {
+          const originalPapers = (loadedGraphData as any).originalPapers;
+          if (originalPapers && (originalPapers.priorWorks || originalPapers.derivativeWorks)) {
+            console.log(`📚 Fallback: Using originalPapers from graphData`);
+            if (originalPapers.priorWorks) {
+              setPriorWorksData(originalPapers.priorWorks);
+              const mergedPriorWorks = new Map<string, any>();
+              Object.values(originalPapers.priorWorks).flat().forEach((work: any) => {
+                const key = work.id || work.title || `${work.title}_${work.year}`;
+                if (!mergedPriorWorks.has(key)) {
+                  mergedPriorWorks.set(key, work);
+                }
+              });
+              setAllPriorWorks(Array.from(mergedPriorWorks.values()));
+            }
+            if (originalPapers.derivativeWorks) {
+              setDerivativeWorksData(originalPapers.derivativeWorks);
+              const mergedDerivativeWorks = new Map<string, any>();
+              Object.values(originalPapers.derivativeWorks).flat().forEach((work: any) => {
+                const key = work.id || work.title || `${work.title}_${work.year}`;
+                if (!mergedDerivativeWorks.has(key)) {
+                  mergedDerivativeWorks.set(key, work);
+                }
+              });
+              setAllDerivativeWorks(Array.from(mergedDerivativeWorks.values()));
+            }
+          }
+        }
+
+        // Mark this graphData with the session ID to prevent accidental overwrites
+        (loadedGraphData as any).__sessionId = currentSessionId;
+        setGraphData(loadedGraphData);
+        setViewMode('graph');
+      } else {
+        console.log(`⏭️  Skipping hook data load: graphData already exists and session matches`);
+      }
     }
   }, [loadedGraphData, currentSessionId]);
+  
+  // Separate useEffect to ALWAYS load prior/derivative works when available from history
+  // This ensures prior/derivative works are loaded even if graphData loading is skipped
+  useEffect(() => {
+    if (!currentSessionId) return;
+    
+    // Always load prior/derivative works if available from hook, regardless of graphData loading status
+    if (loadedPriorWorks && Object.keys(loadedPriorWorks).length > 0) {
+      console.log(`📚 [Separate useEffect] Loading prior works from history:`, {
+        sessionId: currentSessionId,
+        priorWorksKeys: Object.keys(loadedPriorWorks),
+        totalCount: Object.values(loadedPriorWorks).flat().length
+      });
+      setPriorWorksData(loadedPriorWorks);
+      // Merge all prior works from all original papers and calculate stats
+      const mergedPriorWorks = new Map<string, any>();
+      Object.values(loadedPriorWorks).flat().forEach((work: any) => {
+        const key = work.id || work.title || `${work.title}_${work.year}`;
+        if (!mergedPriorWorks.has(key)) {
+          mergedPriorWorks.set(key, work);
+        } else {
+          // Merge if exists (keep best data)
+          const existing = mergedPriorWorks.get(key);
+          mergedPriorWorks.set(key, {
+            ...existing,
+            ...work,
+            citationCount: work.citationCount ?? existing.citationCount,
+            authors: work.authors?.length > existing.authors?.length ? work.authors : existing.authors,
+            strength: work.strength ?? existing.strength
+          });
+        }
+      });
+      
+      // Calculate stats (graphCitations, strength) for prior works using current graphData
+      const priorWorksWithStats = Array.from(mergedPriorWorks.values()).map((work: any) => {
+        // Try to find matching node in graph
+        const matchingNodes = (graphData?.nodes || []).filter((node: any) => {
+          const nodeTitle = (node.title || '').toLowerCase().trim();
+          const workTitle = (work.title || '').toLowerCase().trim();
+          return nodeTitle === workTitle || 
+                 nodeTitle.includes(workTitle.substring(0, 30)) || 
+                 workTitle.includes(nodeTitle.substring(0, 30));
+        });
+        
+        // Get citationCount from work or matching node
+        let citationCount = work.citationCount;
+        if ((citationCount === undefined || citationCount === null) && matchingNodes.length > 0) {
+          const firstMatchingNode = matchingNodes[0];
+          citationCount = firstMatchingNode.citationCount ?? firstMatchingNode.paperCitationCount ?? null;
+        }
+        
+        // Calculate graphCitations and strength from graph edges
+        let graphCitations = 0;
+        let totalStrength = 0;
+        let strengthCount = 0;
+        
+        if (graphData?.edges && matchingNodes.length > 0) {
+          matchingNodes.forEach((matchingNode: any) => {
+            const nodeId = matchingNode.id;
+            const incomingEdges = graphData.edges.filter((edge: any) => {
+              const targetId = typeof edge.target === 'string' ? edge.target : edge.target?.id;
+              return targetId === nodeId;
+            });
+            graphCitations += incomingEdges.length;
+            incomingEdges.forEach((edge: any) => {
+              if (edge.strength !== undefined && edge.strength !== null) {
+                totalStrength += edge.strength;
+                strengthCount++;
+              }
+            });
+          });
+        }
+        
+        const avgStrength = strengthCount > 0 ? totalStrength / strengthCount : (work.strength ?? 0);
+        
+        // Calculate final strength with fallbacks
+        let finalStrength = avgStrength;
+        if (finalStrength <= 0 || finalStrength === undefined || finalStrength === null) {
+          // Fallback 1: Use citationCount-based strength
+          if (citationCount && citationCount > 0) {
+            finalStrength = Math.min(1.0, 0.2 + (Math.log(1 + citationCount) / Math.log(1 + 100000)) * 0.8);
+          }
+          // Fallback 2: Use graphCitations-based strength
+          else if (graphCitations > 0) {
+            finalStrength = Math.min(1.0, 0.25 + (Math.log(1 + graphCitations) / Math.log(1 + 50)) * 0.75);
+          }
+          // Final fallback: minimum strength
+          else {
+            finalStrength = 0.25;
+          }
+        }
+        
+        return {
+          ...work,
+          citationCount: citationCount ?? null, // Use null instead of 0 for missing data
+          graphCitations,
+          strength: finalStrength,
+          avgStrength: avgStrength > 0 ? avgStrength : finalStrength
+        };
+      });
+      
+      setAllPriorWorks(priorWorksWithStats);
+      console.log(`✅ [Separate useEffect] Loaded ${priorWorksWithStats.length} prior works from history with stats`);
+    } else if (loadedPriorWorks && Object.keys(loadedPriorWorks).length === 0) {
+      // Clear prior works if hook returns empty object
+      setPriorWorksData({});
+      setAllPriorWorks([]);
+    }
+    
+    if (loadedDerivativeWorks && Object.keys(loadedDerivativeWorks).length > 0) {
+      console.log(`📚 [Separate useEffect] Loading derivative works from history:`, {
+        sessionId: currentSessionId,
+        derivativeWorksKeys: Object.keys(loadedDerivativeWorks),
+        totalCount: Object.values(loadedDerivativeWorks).flat().length
+      });
+      setDerivativeWorksData(loadedDerivativeWorks);
+      // Merge all derivative works from all original papers and calculate strength
+      const mergedDerivativeWorks = new Map<string, any>();
+      Object.values(loadedDerivativeWorks).flat().forEach((work: any) => {
+        const key = work.id || work.title || `${work.title}_${work.year}`;
+        if (!mergedDerivativeWorks.has(key)) {
+          mergedDerivativeWorks.set(key, work);
+        } else {
+          // Merge if exists (keep best data)
+          const existing = mergedDerivativeWorks.get(key);
+          mergedDerivativeWorks.set(key, {
+            ...existing,
+            ...work,
+            citationCount: work.citationCount ?? existing.citationCount,
+            authors: work.authors?.length > existing.authors?.length ? work.authors : existing.authors,
+            strength: work.strength ?? existing.strength
+          });
+        }
+      });
+      
+      // Calculate strength for derivative works
+      const derivativeWorksWithStrength = Array.from(mergedDerivativeWorks.values()).map((work: any, index: number) => {
+        // Ensure citationCount is a number (backend should return 0 if not found)
+        const citationCount = (work.citationCount !== undefined && work.citationCount !== null && typeof work.citationCount === 'number')
+          ? work.citationCount
+          : 0;
+        
+        let finalStrength = work.strength;
+        
+        // If strength is missing or invalid, calculate from citationCount
+        if (!finalStrength || finalStrength <= 0 || typeof finalStrength !== 'number') {
+          if (citationCount > 0) {
+            // Use logarithmic scaling: 0.3 to 1.0 range
+            finalStrength = Math.min(1.0, 0.3 + (Math.log(1 + citationCount) / Math.log(1 + 100000)) * 0.7);
+          } else {
+            // If citationCount is 0, use position-based minimum strength
+            const totalWorks = mergedDerivativeWorks.size;
+            const positionFactor = totalWorks > 1 ? 1 - (index / (totalWorks - 1)) * 0.15 : 1.0;
+            finalStrength = 0.3 * positionFactor; // Range: 0.255 to 0.3
+          }
+        }
+        
+        // Ensure strength is in valid range
+        finalStrength = Math.max(0.25, Math.min(1.0, finalStrength));
+        
+        return {
+          ...work,
+          citationCount: citationCount, // Always a number (0 if not found)
+          graphCitations: 0, // Derivative works typically not in graph
+          strength: finalStrength
+        };
+      });
+      
+      setAllDerivativeWorks(derivativeWorksWithStrength);
+      console.log(`✅ [Separate useEffect] Loaded ${derivativeWorksWithStrength.length} derivative works from history with stats`);
+    } else if (loadedDerivativeWorks && Object.keys(loadedDerivativeWorks).length === 0) {
+      // Clear derivative works if hook returns empty object
+      setDerivativeWorksData({});
+      setAllDerivativeWorks([]);
+    }
+  }, [currentSessionId, loadedPriorWorks, loadedDerivativeWorks, graphData]);
 
   // Handle session selection from HistorySidebar
   const handleSessionSelect = useCallback((sessionId: string, graphData: any) => {
@@ -589,21 +951,38 @@ const PaperGraphPage: React.FC<PaperGraphPageProps> = ({ setSessionHandler }) =>
 
   // Handle graph data updates from GraphVisualization
   const handleGraphDataUpdate = (updatedData: GraphData) => {
+    const prevCount = previousNodeCountRef.current;
+    const newCount = updatedData.nodes?.length ?? 0;
+
+    // Update local state and track count for next comparison
     setGraphData(updatedData);
-    // Auto-save if there's a current session
-    if (currentSessionId) {
-      // Clear existing timeout
+    previousNodeCountRef.current = newCount;
+    
+    if (isAuthenticated() && currentSessionId) {
+      // If nodes were removed, save immediately to avoid resurrecting deleted nodes from history
+      if (prevCount > newCount) {
+      if (saveTimeoutRef.current) {
+        clearTimeout(saveTimeoutRef.current);
+          saveTimeoutRef.current = null;
+        }
+        updateCurrentSession(updatedData);
+      }
+
+      // Debounce additional saves for non-destructive edits
       if (saveTimeoutRef.current) {
         clearTimeout(saveTimeoutRef.current);
       }
-      // Debounce: wait 2 seconds after last edit before saving
-      // Pass updatedData directly to ensure we save the latest changes
       saveTimeoutRef.current = setTimeout(() => {
         updateCurrentSession(updatedData);
         saveTimeoutRef.current = null;
       }, 2000);
     }
   };
+
+  // Keep node count tracker in sync when graphData changes externally (e.g., loading sessions)
+  useEffect(() => {
+    previousNodeCountRef.current = graphData?.nodes?.length ?? 0;
+  }, [graphData]);
 
   // Handle analysis result (extracted from original code)
   const handleAnalysisResult = async (result: any, validUrls: string[]) => {
@@ -638,17 +1017,37 @@ const PaperGraphPage: React.FC<PaperGraphPageProps> = ({ setSessionHandler }) =>
     
     // 處理成功的結果
     if (result.graphData) {
-      console.log('📊 Processing graph data:', result.graphData);
+      console.log('📊 Processing graph data:', {
+        nodes: result.graphData.nodes?.length || 0,
+        edges: result.graphData.edges?.length || 0,
+        hasNodes: !!result.graphData.nodes,
+        hasEdges: !!result.graphData.edges,
+        nodesType: Array.isArray(result.graphData.nodes) ? 'array' : typeof result.graphData.nodes,
+        edgesType: Array.isArray(result.graphData.edges) ? 'array' : typeof result.graphData.edges,
+        graphDataKeys: Object.keys(result.graphData)
+      });
+      
+      // Ensure nodes and edges are arrays and not null/undefined
+      const graphData = {
+        ...result.graphData,
+        nodes: Array.isArray(result.graphData.nodes) ? result.graphData.nodes : [],
+        edges: Array.isArray(result.graphData.edges) ? result.graphData.edges : []
+      };
+      
+      console.log('📊 Normalized graph data:', {
+        nodes: graphData.nodes.length,
+        edges: graphData.edges.length
+      });
       
       // Transform result to match expected format
       const transformedResult = {
         success: result.success,
-        graphData: result.graphData,
+        graphData: graphData,
         originalPapers: result.originalPapers || {}
       };
       
-      // 保存原始论文 URLs
-      setOriginalPaperUrls(validUrls);
+      // 保存原始论文 URLs (if setOriginalPaperUrls exists)
+      // Note: This variable may not be used, but kept for compatibility
       
       // 保存 Prior Works 和 Derivative Works 数据
       console.log('📚 Checking originalPapers:', {
@@ -682,7 +1081,7 @@ const PaperGraphPage: React.FC<PaperGraphPageProps> = ({ setSessionHandler }) =>
           }
         });
         
-        // 计算每个 prior work 的 graph citations 和 strength
+        // 计算每个 prior work 的 graph citations、citationCount 与 strength（带回退策略）
         const priorWorksWithStats = Array.from(mergedPriorWorks.values()).map((work: any) => {
           const matchingNodes = transformedResult.graphData.nodes.filter((node: any) => {
             const nodeTitle = (node.title || '').toLowerCase().trim();
@@ -692,10 +1091,16 @@ const PaperGraphPage: React.FC<PaperGraphPageProps> = ({ setSessionHandler }) =>
                    workTitle.includes(nodeTitle.substring(0, 30));
           });
           
+          // 更稳健的 citationCount 获取：优先 work 自带，其次图节点的 citationCount / paperCitationCount
+          // 但要注意：如果work.citationCount是undefined/null，说明后端没找到，我们不应该用图节点的值覆盖
+          // 只有在work.citationCount确实是数字（包括0）时才使用work的值
           let citationCount = work.citationCount;
           if ((citationCount === undefined || citationCount === null) && matchingNodes.length > 0) {
             const firstMatchingNode = matchingNodes[0];
-            if (firstMatchingNode.citationCount !== undefined && firstMatchingNode.citationCount !== null) {
+            // 优先使用paperCitationCount，因为它通常更准确
+            if (firstMatchingNode.paperCitationCount !== undefined && firstMatchingNode.paperCitationCount !== null) {
+              citationCount = firstMatchingNode.paperCitationCount;
+            } else if (firstMatchingNode.citationCount !== undefined && firstMatchingNode.citationCount !== null) {
               citationCount = firstMatchingNode.citationCount;
             }
           }
@@ -720,12 +1125,35 @@ const PaperGraphPage: React.FC<PaperGraphPageProps> = ({ setSessionHandler }) =>
           });
           
           const avgStrength = strengthCount > 0 ? totalStrength / strengthCount : 0;
+
+          // 基于 citationCount 的强度回退（对数缩放，范围 0.2~1.0）
+          let citationStrength = 0;
+          if (citationCount && citationCount > 0) {
+            citationStrength = Math.min(
+              1,
+              0.2 + (Math.log(1 + citationCount) / Math.log(1 + 50000)) * 0.8
+            );
+          }
+
+          // 基于 graphCitations 的回退（如果图里有入边）
+          let graphCitationStrength = 0;
+          if (graphCitations > 0) {
+            graphCitationStrength = Math.min(
+              1,
+              0.25 + (Math.log(1 + graphCitations) / Math.log(1 + 30)) * 0.5
+            );
+          }
+
+          // 取所有可用强度的最大值，若仍为 0，则给一个安全兜底值 0.25，避免显示 N/A
+          const finalStrength = Math.max(avgStrength, citationStrength, graphCitationStrength, 0.25);
           
           return {
             ...work,
-            citationCount: citationCount || 0,
+            // citationCount: 保留 undefined/null 表示未知，不再强制 0，便于前端显示 N/A
+            citationCount: citationCount ?? null,
             graphCitations,
-            avgStrength
+            strength: finalStrength,
+            avgStrength: finalStrength
           };
         });
         
@@ -733,8 +1161,17 @@ const PaperGraphPage: React.FC<PaperGraphPageProps> = ({ setSessionHandler }) =>
       }
       
       // 處理 graphData（保留原有邏輯）
-      setGraphData(transformedResult.graphData);
-      console.log('✅ Graph data set successfully');
+      // Mark graphData to prevent it from being overwritten by session hook
+      const finalGraphData = {
+        ...transformedResult.graphData,
+        __isNewAnalysis: true // Mark as new analysis to prevent hook from overwriting
+      };
+      setGraphData(finalGraphData);
+      console.log('✅ Graph data set successfully:', {
+        nodes: finalGraphData.nodes.length,
+        edges: finalGraphData.edges.length,
+        isNewAnalysis: true
+      });
       
       setIsLoading(false);
       setProgress(100);
@@ -1044,8 +1481,17 @@ const PaperGraphPage: React.FC<PaperGraphPageProps> = ({ setSessionHandler }) =>
         );
         
         // 直接使用原始數據，暫時跳過增強功能
-        setGraphData(result.graphData);
-        console.log('✅ Graph data set successfully');
+        // Mark graphData to prevent it from being overwritten by session hook
+        const finalGraphData = {
+          ...result.graphData,
+          __isNewAnalysis: true // Mark as new analysis
+        };
+        setGraphData(finalGraphData);
+        console.log('✅ Graph data set successfully:', {
+          nodes: finalGraphData.nodes.length,
+          edges: finalGraphData.edges.length,
+          isNewAnalysis: true
+        });
       } else {
         throw new Error(result.error || 'Analysis failed');
       }
@@ -1056,12 +1502,80 @@ const PaperGraphPage: React.FC<PaperGraphPageProps> = ({ setSessionHandler }) =>
     }
   };
 
+  // Format citation according to style
+  const formatCitation = (citation: { title?: string; authors?: string[]; year?: string; venue?: string }, _index: number, format: 'apa' | 'ieee' | 'mla' | 'chicago' | 'plain'): string => {
+    const title = citation.title || 'Unknown Title';
+    const authors = citation.authors || [];
+    const year = citation.year || 'Unknown year';
+    const venue = citation.venue || '';
+
+    switch (format) {
+      case 'apa':
+        // APA: Author, A. A., & Author, B. B. (Year). Title of paper. Journal/Conference, Volume(Issue), pages.
+        const apaAuthors = authors.length > 0
+          ? authors.map((author) => {
+              const parts = author.trim().split(/\s+/);
+              if (parts.length >= 2) {
+                const last = parts[parts.length - 1];
+                const initials = parts.slice(0, -1).map((p: string) => p[0]?.toUpperCase() + '.').join(' ');
+                return `${last}, ${initials}`;
+              }
+              return author;
+            }).join(', & ')
+          : 'Unknown authors';
+        return `${apaAuthors} (${year}). ${title}${venue ? `. ${venue}` : ''}.`;
+      
+      case 'ieee':
+        // IEEE: [1] A. A. Author and B. B. Author, "Title of paper," Journal/Conference, vol. X, no. Y, pp. ZZ-ZZ, Year.
+        const ieeeAuthors = authors.length > 0
+          ? authors.map((author) => {
+              const parts = author.trim().split(/\s+/);
+              if (parts.length >= 2) {
+                const last = parts[parts.length - 1];
+                const initials = parts.slice(0, -1).map((p: string) => p[0]?.toUpperCase() + '.').join(' ');
+                return `${initials} ${last}`;
+              }
+              return author;
+            }).join(' and ')
+          : 'Unknown authors';
+        return `${ieeeAuthors}, "${title}"${venue ? `, ${venue}` : ''}, ${year}.`;
+      
+      case 'mla':
+        // MLA: Author, First Name Last Name, et al. "Title of Paper." Journal/Conference, vol. X, no. Y, Year, pp. ZZ-ZZ.
+        const mlaAuthors = authors.length > 0
+          ? authors.length === 1
+            ? authors[0].trim()
+            : authors.length === 2
+            ? `${authors[0].trim()} and ${authors[1].trim()}`
+            : `${authors[0].trim()}, et al.`
+          : 'Unknown authors';
+        return `${mlaAuthors}. "${title}."${venue ? ` ${venue},` : ''} ${year}.`;
+      
+      case 'chicago':
+        // Chicago: Author, First Name Last Name. "Title of Paper." Journal/Conference (Year): pages.
+        const chicagoAuthors = authors.length > 0
+          ? authors.map((author, idx) => {
+              if (idx === authors.length - 1 && authors.length > 1) {
+                return `and ${author.trim()}`;
+              }
+              return author.trim();
+            }).join(authors.length > 2 ? ', ' : ' ')
+          : 'Unknown authors';
+        return `${chicagoAuthors}. "${title}."${venue ? ` ${venue}` : ''} (${year}).`;
+      
+      case 'plain':
+      default:
+        // Plain: Number. Title (Authors) - Year
+        const plainAuthors = authors.length > 0 ? authors.join(', ') : 'Unknown authors';
+        return `${title} (${plainAuthors}) - ${year}`;
+    }
+  };
+
   // Citation extraction
   const extractCitations = async () => {
     if (!citationUrl.trim()) return;
 
     setIsExtracting(true);
-    setShowAllCitations(false); // Reset expand state when extracting new citations
     try {
       const response = await fetch(`${API_BASE_URL}/api/grobid/extract-citations`, {
         method: 'POST',
@@ -1070,7 +1584,7 @@ const PaperGraphPage: React.FC<PaperGraphPageProps> = ({ setSessionHandler }) =>
         },
         body: JSON.stringify({
           url: citationUrl,
-          filterSections
+          filterSections: false // Always extract all citations
         })
       });
 
@@ -1086,39 +1600,61 @@ const PaperGraphPage: React.FC<PaperGraphPageProps> = ({ setSessionHandler }) =>
       
       if (!data.citations || data.citations.length === 0) {
         setCitationResults('No citations found.');
+        setRawCitations([]);
       } else {
-        // 统一格式：编号. 标题 (作者1, 作者2, ...) - 年份
-        const formattedCitations = data.citations.map((c: Citation, index: number) => {
-          const title = c.title || 'Unknown Title';
-          const authors = c.authors && c.authors.length > 0 
-            ? c.authors.join(', ') 
-            : 'Unknown authors';
-          const year = c.year || 'Unknown year';
-          return `${index + 1}. ${title} (${authors}) - ${year}`;
-        });
+        // Store raw citations
+        setRawCitations(data.citations);
+        
+        // Format citations based on selected format
+        const formattedCitations = data.citations.map((c: any, index: number) => 
+          formatCitation({
+            title: c.title,
+            authors: c.authors,
+            year: c.year,
+            venue: c.venue
+          }, index, citationFormat)
+        );
         setCitationResults(formattedCitations.join('\n'));
       }
     } catch (err) {
       const errorMessage = err instanceof Error ? err.message : 'Extraction failed';
       console.error('Citation extraction error:', err);
       setCitationResults(`Error: ${errorMessage}`);
+      setRawCitations([]);
     } finally {
       setIsExtracting(false);
     }
   };
+
+  // Reformat citations when format changes
+  useEffect(() => {
+    if (rawCitations.length > 0) {
+      const formattedCitations = rawCitations.map((c, index) => 
+        formatCitation(c, index, citationFormat)
+      );
+      setCitationResults(formattedCitations.join('\n'));
+    }
+  }, [citationFormat, rawCitations]);
 
   // TODO: Obsidian sync functionality can be added later if needed
 
   return (
     <div className="h-screen flex flex-col overflow-hidden" style={{ backgroundColor: '#1e1e1e' }}>
       {/* Main Content Area - Uses flex-1 to automatically adjust height based on bottom section */}
-      <div className={`flex-1 min-h-0 grid gap-1 overflow-hidden ${
-        isConfigCollapsed 
-          ? (showGuideSidebar ? 'grid-cols-[50px_1fr_350px]' : 'grid-cols-[50px_1fr]')
-          : (showGuideSidebar ? 'grid-cols-[320px_1fr_350px]' : 'grid-cols-[320px_1fr]')
-      }`}>
+      <div className="flex-1 min-h-0 flex gap-1 overflow-hidden">
         
-        {/* Left Column - Configuration */}
+        {/* Left Column - Configuration with Resizable Sidebar */}
+        {!isConfigCollapsed && (
+          <ResizableSidebar
+            initialWidth={320}
+            minWidth={250}
+            maxWidth={500}
+            position="left"
+            collapsed={false}
+            onCollapseChange={setIsConfigCollapsed}
+            onWidthChange={setLeftSidebarWidth}
+            collapsedWidth={50}
+          >
         <div className="h-full flex flex-col overflow-hidden min-w-0">
           {/* Analysis Configuration - Professional scrollable panel with Tailwind classes */}
           <div className="h-full min-h-0 overflow-y-auto overflow-x-hidden p-5 shadow-xl 
@@ -1128,22 +1664,23 @@ const PaperGraphPage: React.FC<PaperGraphPageProps> = ({ setSessionHandler }) =>
                          scrollbar-academic transition-all duration-300">
           {/* Header Section - Professional academic styling */}
           <div className="flex items-center justify-between mb-5 pb-3 border-b-2" style={{ borderColor: 'rgba(100, 200, 100, 0.3)' }}>
-            {!isConfigCollapsed && (
               <h2 className="text-lg font-semibold tracking-wide" style={{ color: '#e8e8e8', fontFamily: '-apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif' }}>
                 Analysis Configuration
               </h2>
-            )}
             <button
-              onClick={() => setIsConfigCollapsed(!isConfigCollapsed)}
-              className="ml-auto px-3 py-1.5 rounded-lg 
-                         text-sm font-medium
-                         style={{ backgroundColor: '#2d2d2d', color: '#64c864', border: '1px solid rgba(100, 200, 100, 0.2)' }}
-                         onMouseEnter={(e) => e.currentTarget.style.backgroundColor = '#252525'}
-                         onMouseLeave={(e) => e.currentTarget.style.backgroundColor = '#2d2d2d'}
-                         transition-all duration-200 hover:shadow-md active:scale-95"
-              title={isConfigCollapsed ? "Expand configuration panel" : "Collapse configuration panel"}
+                onClick={() => setIsConfigCollapsed(true)}
+                className="ml-auto px-3 py-1.5 rounded-lg text-sm font-medium transition-all duration-200 flex items-center gap-2"
+              style={{ 
+                backgroundColor: '#2d2d2d', 
+                color: '#64c864', 
+                border: '1px solid rgba(100, 200, 100, 0.2)' 
+              }}
+              onMouseEnter={(e) => e.currentTarget.style.backgroundColor = '#252525'}
+              onMouseLeave={(e) => e.currentTarget.style.backgroundColor = '#2d2d2d'}
+                title="Collapse configuration panel"
             >
-              {isConfigCollapsed ? '▶' : '◀'}
+                <ExpandLessIcon className="w-4 h-4" />
+                <span>Hide</span>
             </button>
           </div>
           
@@ -1284,167 +1821,6 @@ const PaperGraphPage: React.FC<PaperGraphPageProps> = ({ setSessionHandler }) =>
             </div>
           </div>
 
-          {/* Citation Extractor Toggle */}
-          <div className="mb-4">
-            <button
-              onClick={() => setShowCitationExtractor(!showCitationExtractor)}
-              className="flex items-center justify-between w-full p-3 border rounded text-sm transition-colors"
-              style={{
-                backgroundColor: '#2d2d2d',
-                borderColor: 'rgba(100, 200, 100, 0.3)',
-                color: '#e8e8e8',
-                fontFamily: '-apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif'
-              }}
-              onMouseEnter={(e) => {
-                e.currentTarget.style.backgroundColor = '#252525';
-              }}
-              onMouseLeave={(e) => {
-                e.currentTarget.style.backgroundColor = '#2d2d2d';
-              }}
-            >
-              <span className="font-medium flex items-center gap-2">
-                <DescriptionIcon className="w-4 h-4" /> Citation Extractor
-              </span>
-              {showCitationExtractor ? (
-                <ExpandMoreIcon className="w-4 h-4" style={{ color: '#b8b8b8' }} />
-              ) : (
-                <ExpandLessIcon className="w-4 h-4 rotate-180" style={{ color: '#b8b8b8' }} />
-              )}
-            </button>
-
-            {showCitationExtractor && (
-              <div className="mt-3 space-y-3">
-                <div className="flex gap-2">
-                  <input
-                    type="url"
-                    value={citationUrl}
-                    onChange={(e) => setCitationUrl(e.target.value)}
-                    placeholder="Paper URL for citation extraction"
-                    className="form-input flex-1 text-sm focus:outline-none"
-                    style={{
-                      borderColor: 'rgba(100, 200, 100, 0.3)',
-                      backgroundColor: '#2d2d2d',
-                      color: '#e8e8e8',
-                      borderRadius: '8px',
-                      padding: '8px 12px'
-                    }}
-                  />
-                  <button
-                    onClick={extractCitations}
-                    disabled={isExtracting || !citationUrl}
-                    className="btn-primary px-3 py-2 text-sm disabled:opacity-50 flex items-center justify-center gap-2 transition-all duration-200"
-                    style={{
-                      background: isExtracting || !citationUrl 
-                        ? '#252525' 
-                        : 'linear-gradient(135deg, #64c864 0%, #4ade80 100%)',
-                      color: isExtracting || !citationUrl ? '#888888' : '#1e1e1e',
-                      borderRadius: '8px',
-                      border: isExtracting || !citationUrl ? '1px solid rgba(100, 200, 100, 0.2)' : 'none',
-                      fontFamily: '-apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif',
-                      minWidth: '90px',
-                      cursor: isExtracting || !citationUrl ? 'not-allowed' : 'pointer',
-                      fontWeight: 600,
-                      boxShadow: isExtracting || !citationUrl ? 'none' : '0 2px 8px rgba(100, 200, 100, 0.3)'
-                    }}
-                    onMouseEnter={(e) => {
-                      if (!isExtracting && citationUrl) {
-                        e.currentTarget.style.background = 'linear-gradient(135deg, #4ade80 0%, #22c55e 100%)';
-                        e.currentTarget.style.boxShadow = '0 4px 12px rgba(100, 200, 100, 0.4)';
-                      }
-                    }}
-                    onMouseLeave={(e) => {
-                      if (!isExtracting && citationUrl) {
-                        e.currentTarget.style.background = 'linear-gradient(135deg, #64c864 0%, #4ade80 100%)';
-                        e.currentTarget.style.boxShadow = '0 2px 8px rgba(100, 200, 100, 0.3)';
-                      }
-                    }}
-                  >
-                    {isExtracting ? (
-                      <>
-                        <svg className="animate-spin h-4 w-4" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" style={{ color: '#1e1e1e' }}>
-                          <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4" style={{ color: '#1e1e1e' }}></circle>
-                          <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z" style={{ color: '#F5F5DC' }}></path>
-                        </svg>
-                        <span>Extracting...</span>
-                      </>
-                    ) : (
-                      <span>Extract</span>
-                    )}
-                  </button>
-                </div>
-                
-                {citationResults && (
-                  <div className="max-h-40 overflow-y-auto p-3 rounded text-xs" style={{
-                    backgroundColor: '#252525',
-                    border: '1px solid rgba(100, 200, 100, 0.3)',
-                    borderRadius: '8px'
-                  }}>
-                    <h4 className="font-semibold mb-2" style={{ 
-                      color: '#e8e8e8',
-                      fontFamily: '-apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif'
-                    }}>Extracted Citations ({citationResults.split('\n').length}):</h4>
-                    <div className="space-y-1" style={{ fontFamily: 'monospace', fontSize: '11px' }}>
-                      {(() => {
-                        const citationsList = citationResults.split('\n');
-                        const displayCount = showAllCitations ? citationsList.length : Math.min(20, citationsList.length);
-                        const remainingCount = citationsList.length - 20;
-                        
-                        return (
-                          <>
-                            {citationsList.slice(0, displayCount).map((citation, index) => (
-                              <div key={index} style={{ color: '#707C5D', lineHeight: '1.4' }}>
-                                {citation}
-                              </div>
-                            ))}
-                            {remainingCount > 0 && !showAllCitations && (
-                              <div 
-                                style={{ 
-                                  color: '#64c864', 
-                                  fontWeight: '600',
-                                  marginTop: '4px',
-                                  cursor: 'pointer',
-                                  textDecoration: 'underline'
-                                }}
-                                onClick={() => setShowAllCitations(true)}
-                                onMouseEnter={(e) => {
-                                  e.currentTarget.style.color = '#4ade80';
-                                }}
-                                onMouseLeave={(e) => {
-                                  e.currentTarget.style.color = '#BDB4D3';
-                                }}
-                              >
-                                ... and {remainingCount} more citations
-                  </div>
-                )}
-                            {showAllCitations && remainingCount > 0 && (
-                              <div 
-                                style={{ 
-                                  color: '#64c864', 
-                                  fontWeight: '600',
-                                  marginTop: '4px',
-                                  cursor: 'pointer',
-                                  textDecoration: 'underline'
-                                }}
-                                onClick={() => setShowAllCitations(false)}
-                                onMouseEnter={(e) => {
-                                  e.currentTarget.style.color = '#4ade80';
-                                }}
-                                onMouseLeave={(e) => {
-                                  e.currentTarget.style.color = '#BDB4D3';
-                                }}
-                              >
-                                Show less
-                              </div>
-                            )}
-                          </>
-                        );
-                      })()}
-                    </div>
-                  </div>
-                )}
-              </div>
-            )}
-          </div>
 
           {/* Obsidian Sync Toggle */}
           <div className="mb-4">
@@ -1553,86 +1929,314 @@ const PaperGraphPage: React.FC<PaperGraphPageProps> = ({ setSessionHandler }) =>
               <span>Start Analysis</span>
             )}
           </button>
+
+          {/* New Analysis Button - Below Start Analysis */}
+          <button
+            onClick={() => {
+              if (window.confirm('Are you sure you want to start a new analysis? This will clear all current results.')) {
+                // Clear all state
+                setGraphData(null);
+                setPriorWorksData({});
+                setDerivativeWorksData({});
+                setAllPriorWorks([]);
+                setAllDerivativeWorks([]);
+                setCurrentSessionId(null);
+                setProgress(0);
+                setProgressInfo(undefined);
+                setError(null);
+                setIsLoading(false);
+                // Reset view mode
+                setViewMode('graph');
+                // Scroll to top
+                window.scrollTo({ top: 0, behavior: 'smooth' });
+              }
+            }}
+            className="w-full px-4 py-3 rounded-lg font-medium transition-all flex items-center justify-center gap-2 mt-3"
+            style={{
+              backgroundColor: 'rgba(100, 200, 100, 0.15)',
+              color: '#64c864',
+              border: '1px solid rgba(100, 200, 100, 0.3)',
+              borderRadius: '8px',
+              fontFamily: '-apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif',
+              fontWeight: 600,
+            }}
+            onMouseEnter={(e) => {
+              e.currentTarget.style.backgroundColor = 'rgba(100, 200, 100, 0.25)';
+              e.currentTarget.style.borderColor = 'rgba(100, 200, 100, 0.5)';
+            }}
+            onMouseLeave={(e) => {
+              e.currentTarget.style.backgroundColor = 'rgba(100, 200, 100, 0.15)';
+              e.currentTarget.style.borderColor = 'rgba(100, 200, 100, 0.3)';
+            }}
+            title="Start New Analysis"
+          >
+            <AddCircleOutlineIcon style={{ fontSize: '20px' }} />
+            <span>New Analysis</span>
+          </button>
           </>
           )}
           </div>
         </div>
+        </ResizableSidebar>
+        )}
 
-        {/* Right Column - Main Content with Mode Switching */}
-        <div className="h-full overflow-hidden relative flex flex-col" style={{ backgroundColor: '#1e1e1e' }}>
-          {/* Guide Toggle Button - Fixed at top right */}
-          <button
-            onClick={() => setShowGuideSidebar(!showGuideSidebar)}
-            className="absolute top-4 right-4 z-50 px-4 py-2 rounded-lg transition-all duration-200 flex items-center gap-2"
-            style={{
-              backgroundColor: showGuideSidebar ? '#64c864' : '#2d2d2d',
-              color: showGuideSidebar ? '#1e1e1e' : '#64c864',
-              border: '1px solid rgba(100, 200, 100, 0.3)',
-              fontFamily: '-apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif',
-              fontWeight: 600,
-              fontSize: '14px',
-              boxShadow: showGuideSidebar ? '0 2px 8px rgba(100, 200, 100, 0.3)' : 'none'
-            }}
-            onMouseEnter={(e) => {
-              if (!showGuideSidebar) {
-                e.currentTarget.style.backgroundColor = '#252525';
-                e.currentTarget.style.borderColor = 'rgba(100, 200, 100, 0.5)';
-              }
-            }}
-            onMouseLeave={(e) => {
-              if (!showGuideSidebar) {
-                e.currentTarget.style.backgroundColor = '#2d2d2d';
-                e.currentTarget.style.borderColor = 'rgba(100, 200, 100, 0.3)';
-              }
-            }}
-          >
-            <BookIcon className="w-4 h-4" />
-            <span>{showGuideSidebar ? 'Hide Guide' : 'Show Guide'}</span>
-          </button>
-        {/* Header with Mode Tabs */}
-        {graphData && (
-          <div className="border-b" style={{ 
-            borderColor: 'rgba(100, 200, 100, 0.3)',
-            background: 'linear-gradient(135deg, #64c864 0%, #4ade80 100%)'
-          }}>
-            <div className="flex items-center justify-center border-b" style={{ borderColor: '#A39A86' }}>
+        {/* Center Column - Main Content with Mode Switching */}
+        <div className="flex-1 h-full overflow-hidden relative flex flex-col" style={{ backgroundColor: '#1e1e1e' }}>
+        {/* Header with Mode Tabs - Professional Tab Design - Always visible */}
+        <div className="border-b relative" style={{ 
+          borderColor: 'rgba(100, 200, 100, 0.2)',
+          backgroundColor: '#252525',
+          zIndex: 10,
+        }}>
+            <div 
+              className="flex items-center justify-between border-b" 
+              style={{ 
+                borderColor: 'rgba(100, 200, 100, 0.1)',
+                paddingLeft: '16px',
+                paddingRight: '16px',
+              }}
+            >
+              {/* Left side: Configuration button and tabs */}
+              <div className="flex items-center">
+                {/* Configuration Toggle Button - Inside tabs bar when collapsed (show when loading or have graphData) */}
+                {isConfigCollapsed && (
+            <button
+                    onClick={() => setIsConfigCollapsed(false)}
+                    className="px-4 py-3 rounded-lg transition-all duration-200 flex items-center gap-2 mr-4"
+              style={{
+                      backgroundColor: '#2d2d2d',
+                      color: '#64c864',
+                border: '1px solid rgba(100, 200, 100, 0.3)',
+                fontFamily: '-apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif',
+                fontWeight: 600,
+                fontSize: '14px',
+                height: '42px',
+                display: 'flex',
+                alignItems: 'center'
+              }}
+              onMouseEnter={(e) => {
+                  e.currentTarget.style.backgroundColor = '#252525';
+                  e.currentTarget.style.borderColor = 'rgba(100, 200, 100, 0.5)';
+              }}
+              onMouseLeave={(e) => {
+                  e.currentTarget.style.backgroundColor = '#2d2d2d';
+                  e.currentTarget.style.borderColor = 'rgba(100, 200, 100, 0.3)';
+              }}
+            >
+                    <SettingsIcon className="w-4 h-4" />
+                    <span>Show Configuration</span>
+            </button>
+                )}
               <button
                 onClick={() => setViewMode('graph')}
-                className="px-6 py-3 text-sm font-medium transition-colors"
+                className="px-6 py-3 text-sm font-semibold transition-all duration-200 relative"
                 style={{
-                  backgroundColor: viewMode === 'graph' ? '#2d2d2d' : 'transparent',
-                  color: viewMode === 'graph' ? '#64c864' : '#e8e8e8',
-                  borderBottom: viewMode === 'graph' ? '2px solid rgba(100, 200, 100, 0.5)' : '2px solid transparent',
-            fontFamily: '"Lora", "Merriweather", "Georgia", serif'
+                  backgroundColor: viewMode === 'graph' ? 'transparent' : 'transparent',
+                  color: viewMode === 'graph' ? '#64c864' : '#b8b8b8',
+                  borderBottom: viewMode === 'graph' ? '2px solid #64c864' : '2px solid transparent',
+                  fontFamily: '-apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif',
+                  fontWeight: viewMode === 'graph' ? 600 : 500,
+                }}
+                onMouseEnter={(e) => {
+                  if (viewMode !== 'graph') {
+                    e.currentTarget.style.color = '#e8e8e8';
+                  }
+                }}
+                onMouseLeave={(e) => {
+                  if (viewMode !== 'graph') {
+                    e.currentTarget.style.color = '#b8b8b8';
+                  }
                 }}
               >
-                <BarChartIcon className="w-4 h-4 mr-1 inline" /> Graph
+                <BarChartIcon className="w-4 h-4 mr-2 inline" style={{ verticalAlign: 'middle' }} /> 
+                Graph View
               </button>
               <button
                 onClick={() => setViewMode('prior-works')}
-                className="px-6 py-3 text-sm font-medium transition-colors"
+                className="px-6 py-3 text-sm font-semibold transition-all duration-200 relative"
                 style={{
-                  backgroundColor: viewMode === 'prior-works' ? '#2d2d2d' : 'transparent',
-                  color: viewMode === 'prior-works' ? '#64c864' : '#e8e8e8',
-                  borderBottom: viewMode === 'prior-works' ? '2px solid #BDB4D3' : '2px solid transparent',
-                  fontFamily: '-apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif'
+                  backgroundColor: viewMode === 'prior-works' ? 'transparent' : 'transparent',
+                  color: viewMode === 'prior-works' ? '#64c864' : '#b8b8b8',
+                  borderBottom: viewMode === 'prior-works' ? '2px solid #64c864' : '2px solid transparent',
+                  fontFamily: '-apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif',
+                  fontWeight: viewMode === 'prior-works' ? 600 : 500,
+                }}
+                onMouseEnter={(e) => {
+                  if (viewMode !== 'prior-works') {
+                    e.currentTarget.style.color = '#e8e8e8';
+                  }
+                }}
+                onMouseLeave={(e) => {
+                  if (viewMode !== 'prior-works') {
+                    e.currentTarget.style.color = '#b8b8b8';
+                  }
                 }}
               >
-                <MenuBookIcon className="w-4 h-4 mr-1 inline" /> Prior Works ({allPriorWorks.length})
+                <MenuBookIcon className="w-4 h-4 mr-2 inline" style={{ verticalAlign: 'middle' }} /> 
+                Prior Works
+                {allPriorWorks.length > 0 && (
+                  <span className="ml-2 px-2 py-0.5 rounded-full text-xs" style={{
+                    backgroundColor: viewMode === 'prior-works' ? 'rgba(100, 200, 100, 0.2)' : 'rgba(100, 200, 100, 0.1)',
+                    color: '#64c864',
+                  }}>
+                    {allPriorWorks.length}
+                  </span>
+                )}
               </button>
               <button
                 onClick={() => setViewMode('derivative-works')}
-                className="px-6 py-3 text-sm font-medium transition-colors"
+                className="px-6 py-3 text-sm font-semibold transition-all duration-200 relative"
                 style={{
-                  backgroundColor: viewMode === 'derivative-works' ? '#2d2d2d' : 'transparent',
-                  color: viewMode === 'derivative-works' ? '#64c864' : '#e8e8e8',
-                  borderBottom: viewMode === 'derivative-works' ? '2px solid #BDB4D3' : '2px solid transparent',
-                  fontFamily: '-apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif'
+                  backgroundColor: viewMode === 'derivative-works' ? 'transparent' : 'transparent',
+                  color: viewMode === 'derivative-works' ? '#64c864' : '#b8b8b8',
+                  borderBottom: viewMode === 'derivative-works' ? '2px solid #64c864' : '2px solid transparent',
+                  fontFamily: '-apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif',
+                  fontWeight: viewMode === 'derivative-works' ? 600 : 500,
+                }}
+                onMouseEnter={(e) => {
+                  if (viewMode !== 'derivative-works') {
+                    e.currentTarget.style.color = '#e8e8e8';
+                  }
+                }}
+                onMouseLeave={(e) => {
+                  if (viewMode !== 'derivative-works') {
+                    e.currentTarget.style.color = '#b8b8b8';
+                  }
                 }}
               >
-                <LinkIcon className="w-4 h-4 mr-1 inline" /> Derivative Works ({allDerivativeWorks.length})
+                <LinkIcon className="w-4 h-4 mr-2 inline" style={{ verticalAlign: 'middle' }} /> 
+                Derivative Works
+                {allDerivativeWorks.length > 0 && (
+                  <span className="ml-2 px-2 py-0.5 rounded-full text-xs" style={{
+                    backgroundColor: viewMode === 'derivative-works' ? 'rgba(100, 200, 100, 0.2)' : 'rgba(100, 200, 100, 0.1)',
+                    color: '#64c864',
+                  }}>
+                    {allDerivativeWorks.length}
+                  </span>
+                )}
+              </button>
+              <button
+                onClick={() => setViewMode('citation-extractor')}
+                className="px-6 py-3 text-sm font-semibold transition-all duration-200 relative"
+                style={{
+                  backgroundColor: viewMode === 'citation-extractor' ? 'transparent' : 'transparent',
+                  color: viewMode === 'citation-extractor' ? '#64c864' : '#b8b8b8',
+                  borderBottom: viewMode === 'citation-extractor' ? '2px solid #64c864' : '2px solid transparent',
+                  fontFamily: '-apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif',
+                  fontWeight: viewMode === 'citation-extractor' ? 600 : 500,
+                }}
+                onMouseEnter={(e) => {
+                  if (viewMode !== 'citation-extractor') {
+                    e.currentTarget.style.color = '#e8e8e8';
+                  }
+                }}
+                onMouseLeave={(e) => {
+                  if (viewMode !== 'citation-extractor') {
+                    e.currentTarget.style.color = '#b8b8b8';
+                  }
+                }}
+              >
+                <DescriptionIcon className="w-4 h-4 mr-2 inline" style={{ verticalAlign: 'middle' }} /> 
+                Citation Extractor
               </button>
             </div>
+
+              {/* Right side: Guide button */}
+              {!showGuideSidebar && (
+                <button
+                  onClick={() => setShowGuideSidebar(true)}
+                  className="px-4 py-3 rounded-lg transition-all duration-200 flex items-center gap-2"
+                  style={{
+                    backgroundColor: '#2d2d2d',
+                    color: '#64c864',
+                    border: '1px solid rgba(100, 200, 100, 0.3)',
+                    fontFamily: '-apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif',
+                    fontWeight: 600,
+                    fontSize: '14px',
+                    height: '42px',
+                    display: 'flex',
+                    alignItems: 'center'
+                  }}
+                  onMouseEnter={(e) => {
+                    e.currentTarget.style.backgroundColor = '#252525';
+                    e.currentTarget.style.borderColor = 'rgba(100, 200, 100, 0.5)';
+                  }}
+                  onMouseLeave={(e) => {
+                    e.currentTarget.style.backgroundColor = '#2d2d2d';
+                    e.currentTarget.style.borderColor = 'rgba(100, 200, 100, 0.3)';
+                  }}
+                >
+                  <BookIcon className="w-4 h-4" />
+                  <span>Show Guide</span>
+                </button>
+              )}
+            </div>
+          </div>
+
+        {/* Top Right - Show Guide button when no graphData and not loading */}
+        {!graphData && !isLoading && !showGuideSidebar && (
+          <div className="absolute top-1 right-4 z-50">
+            <button
+              onClick={() => setShowGuideSidebar(true)}
+              className="px-4 py-3 rounded-lg transition-all duration-200 flex items-center gap-2"
+              style={{
+                backgroundColor: '#2d2d2d',
+                color: '#64c864',
+                border: '1px solid rgba(100, 200, 100, 0.3)',
+                fontFamily: '-apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif',
+                fontWeight: 600,
+                fontSize: '14px',
+                height: '42px',
+                display: 'flex',
+                alignItems: 'center'
+              }}
+              onMouseEnter={(e) => {
+                e.currentTarget.style.backgroundColor = '#252525';
+                e.currentTarget.style.borderColor = 'rgba(100, 200, 100, 0.5)';
+              }}
+              onMouseLeave={(e) => {
+                e.currentTarget.style.backgroundColor = '#2d2d2d';
+                e.currentTarget.style.borderColor = 'rgba(100, 200, 100, 0.3)';
+              }}
+            >
+              <BookIcon className="w-4 h-4" />
+              <span>Show Guide</span>
+            </button>
+          </div>
+        )}
+
+        {/* Top Left Button - Configuration Toggle - Only show when sidebar is hidden, no graphData, and not loading */}
+        {isConfigCollapsed && !graphData && !isLoading && (
+          <div 
+            className="absolute left-4 top-1 z-[100] flex items-center gap-2" 
+          >
+            <button
+              onClick={() => setIsConfigCollapsed(false)}
+              className="px-4 py-3 rounded-lg transition-all duration-200 flex items-center gap-2"
+              style={{
+                backgroundColor: '#2d2d2d',
+                color: '#64c864',
+                border: '1px solid rgba(100, 200, 100, 0.3)',
+                fontFamily: '-apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif',
+                fontWeight: 600,
+                fontSize: '14px',
+                height: '42px',
+                display: 'flex',
+                alignItems: 'center',
+                zIndex: 100,
+              }}
+              onMouseEnter={(e) => {
+                e.currentTarget.style.backgroundColor = '#252525';
+                e.currentTarget.style.borderColor = 'rgba(100, 200, 100, 0.5)';
+              }}
+              onMouseLeave={(e) => {
+                e.currentTarget.style.backgroundColor = '#2d2d2d';
+                e.currentTarget.style.borderColor = 'rgba(100, 200, 100, 0.3)';
+              }}
+            >
+              <SettingsIcon className="w-4 h-4" />
+              <span>Show Configuration</span>
+            </button>
           </div>
         )}
         
@@ -1685,7 +2289,7 @@ const PaperGraphPage: React.FC<PaperGraphPageProps> = ({ setSessionHandler }) =>
                     <div style={{ textAlign: 'center' }}>
                       <p style={{ marginBottom: '12px' }}>No graph data available</p>
                       <p style={{ fontSize: '14px', opacity: 0.7 }}>Click "Start Analysis" to begin</p>
-                    </div>
+                </div>
                   </div>
                 )
               )}
@@ -1702,7 +2306,7 @@ const PaperGraphPage: React.FC<PaperGraphPageProps> = ({ setSessionHandler }) =>
                       These are papers that were most commonly cited by the papers in the graph.
                       This usually means that they are <strong>important seminal works</strong> for this field and it could be a good idea to get familiar with them.
                   </p>
-                </div>
+            </div>
                   
                   {allPriorWorks.length > 0 ? (
                     <div className="overflow-x-auto">
@@ -1740,8 +2344,8 @@ const PaperGraphPage: React.FC<PaperGraphPageProps> = ({ setSessionHandler }) =>
                                   >
                                     ▼
                                   </span>
-                </div>
-            </div>
+          </div>
+        </div>
                             </th>
                             <th 
                               className="text-left p-3 text-sm font-semibold select-none" 
@@ -1762,8 +2366,8 @@ const PaperGraphPage: React.FC<PaperGraphPageProps> = ({ setSessionHandler }) =>
                                   <div style={{ lineHeight: '1.2' }}>
                                     <div>{showFirstAuthor ? 'First' : 'Last'}</div>
                                     <div style={{ marginLeft: showFirstAuthor ? '12px' : '8px' }}>author</div>
-                                  </div>
-                                  
+      </div>
+
                                   {/* Sort Indicator */}
                                   <div className="flex flex-col" style={{ fontSize: '9px', lineHeight: '0.9' }}>
                                     <span 
@@ -1783,8 +2387,8 @@ const PaperGraphPage: React.FC<PaperGraphPageProps> = ({ setSessionHandler }) =>
                                       ▼
                                     </span>
             </div>
-          </div>
-                                
+        </div>
+        
                                 {/* Toggle Switch - White circle on left/right */}
                                 <button
                                   onClick={(e) => {
@@ -1935,12 +2539,8 @@ const PaperGraphPage: React.FC<PaperGraphPageProps> = ({ setSessionHandler }) =>
                                   bVal = (b.title || '').toLowerCase();
                                   break;
                                 case 'lastAuthor':
-                                  const aAuthor = a.authors && a.authors.length > 0 
-                                    ? (showFirstAuthor ? a.authors[0] : a.authors[a.authors.length - 1])
-                                    : '';
-                                  const bAuthor = b.authors && b.authors.length > 0 
-                                    ? (showFirstAuthor ? b.authors[0] : b.authors[b.authors.length - 1])
-                                    : '';
+                                  const aAuthor = getDisplayAuthor(a.authors, showFirstAuthor);
+                                  const bAuthor = getDisplayAuthor(b.authors, showFirstAuthor);
                                   aVal = aAuthor.toLowerCase();
                                   bVal = bAuthor.toLowerCase();
                                   break;
@@ -1973,19 +2573,21 @@ const PaperGraphPage: React.FC<PaperGraphPageProps> = ({ setSessionHandler }) =>
                               <td className="p-3 text-sm" style={{ color: '#e8e8e8' }}>
                                 {work.title || 'Unknown Title'}
                               </td>
-                              <td className="p-3 text-sm" style={{ color: '#e8e8e8' }}>
-                                {work.authors && work.authors.length > 0 
-                                  ? (showFirstAuthor ? work.authors[0] : work.authors[work.authors.length - 1])
-                                  : 'Unknown'}
-                              </td>
+                                <td className="p-3 text-sm" style={{ color: '#e8e8e8' }}>
+                                  {getDisplayAuthor(work.authors, showFirstAuthor)}
+                                </td>
                               <td className="p-3 text-sm" style={{ color: '#e8e8e8' }}>
                                 {work.year || 'Unknown'}
                               </td>
                               <td className="p-3 text-sm" style={{ color: '#e8e8e8' }}>
-                                {work.citationCount !== undefined ? work.citationCount.toLocaleString() : 'N/A'}
+                                {typeof work.citationCount === 'number' ? (
+                                  work.citationCount.toLocaleString()
+                                ) : (
+                                  <span style={{ opacity: 0.6, fontStyle: 'italic' }} title="Citation count not available">N/A</span>
+                                )}
                               </td>
                               <td className="p-3 text-sm" style={{ color: '#e8e8e8' }}>
-                                {work.strength !== undefined ? work.strength.toFixed(3) : 'N/A'}
+                                {typeof work.strength === 'number' ? work.strength.toFixed(2) : '0.00'}
                               </td>
                             </tr>
                           ))}
@@ -2243,12 +2845,8 @@ const PaperGraphPage: React.FC<PaperGraphPageProps> = ({ setSessionHandler }) =>
                                   bVal = (b.title || '').toLowerCase();
                                   break;
                                 case 'lastAuthor':
-                                  const aAuthor = a.authors && a.authors.length > 0 
-                                    ? (showDerivativeFirstAuthor ? a.authors[0] : a.authors[a.authors.length - 1])
-                                    : '';
-                                  const bAuthor = b.authors && b.authors.length > 0 
-                                    ? (showDerivativeFirstAuthor ? b.authors[0] : b.authors[b.authors.length - 1])
-                                    : '';
+                                  const aAuthor = getDisplayAuthor(a.authors, showDerivativeFirstAuthor);
+                                  const bAuthor = getDisplayAuthor(b.authors, showDerivativeFirstAuthor);
                                   aVal = aAuthor.toLowerCase();
                                   bVal = bAuthor.toLowerCase();
                                   break;
@@ -2282,18 +2880,16 @@ const PaperGraphPage: React.FC<PaperGraphPageProps> = ({ setSessionHandler }) =>
                                 {work.title || 'Unknown Title'}
                               </td>
                               <td className="p-3 text-sm" style={{ color: '#e8e8e8' }}>
-                                {work.authors && work.authors.length > 0 
-                                  ? (showDerivativeFirstAuthor ? work.authors[0] : work.authors[work.authors.length - 1])
-                                  : 'Unknown'}
+                                  {getDisplayAuthor(work.authors, showDerivativeFirstAuthor)}
                               </td>
                               <td className="p-3 text-sm" style={{ color: '#e8e8e8' }}>
                                 {work.year || 'Unknown'}
                               </td>
                               <td className="p-3 text-sm" style={{ color: '#e8e8e8' }}>
-                                {work.citationCount !== undefined ? work.citationCount.toLocaleString() : 'N/A'}
+                                {typeof work.citationCount === 'number' ? work.citationCount.toLocaleString() : 'N/A'}
                               </td>
                               <td className="p-3 text-sm" style={{ color: '#e8e8e8' }}>
-                                {work.strength !== undefined ? work.strength.toFixed(2) : 'N/A'}
+                                {typeof work.strength === 'number' ? work.strength.toFixed(2) : 'N/A'}
                               </td>
                             </tr>
                           ))}
@@ -2308,7 +2904,236 @@ const PaperGraphPage: React.FC<PaperGraphPageProps> = ({ setSessionHandler }) =>
                 </div>
               )}
           
-          {!graphData && !isLoading && (
+          {viewMode === 'citation-extractor' && (
+            <div className="h-full overflow-y-auto p-6" style={{ backgroundColor: '#1e1e1e' }}>
+              <div className="max-w-6xl mx-auto">
+                <h2 className="text-2xl font-bold mb-6" style={{ 
+                  color: '#e8e8e8',
+                  fontFamily: '-apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif'
+                }}>
+                  Citation Extractor
+                </h2>
+                
+                <div className="mb-6">
+                  <div className="flex gap-3 mb-4">
+                    <input
+                      type="url"
+                      value={citationUrl}
+                      onChange={(e) => setCitationUrl(e.target.value)}
+                      placeholder="Enter paper URL for citation extraction (e.g., https://arxiv.org/abs/2305.10403)"
+                      className="flex-1 text-sm focus:outline-none"
+                      style={{
+                        borderColor: 'rgba(100, 200, 100, 0.3)',
+                        backgroundColor: '#2d2d2d',
+                        color: '#e8e8e8',
+                        borderRadius: '8px',
+                        padding: '12px 16px',
+                        border: '1px solid rgba(100, 200, 100, 0.3)',
+                        fontFamily: '-apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif'
+                      }}
+                    />
+                    <button
+                      onClick={extractCitations}
+                      disabled={isExtracting || !citationUrl}
+                      className="px-6 py-3 text-sm disabled:opacity-50 flex items-center justify-center gap-2 transition-all duration-200 font-semibold"
+                      style={{
+                        background: isExtracting || !citationUrl 
+                          ? '#252525' 
+                          : 'linear-gradient(135deg, #64c864 0%, #4ade80 100%)',
+                        color: isExtracting || !citationUrl ? '#888888' : '#1e1e1e',
+                        borderRadius: '8px',
+                        border: isExtracting || !citationUrl ? '1px solid rgba(100, 200, 100, 0.2)' : 'none',
+                        fontFamily: '-apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif',
+                        cursor: isExtracting || !citationUrl ? 'not-allowed' : 'pointer',
+                        boxShadow: isExtracting || !citationUrl ? 'none' : '0 2px 8px rgba(100, 200, 100, 0.3)'
+                      }}
+                      onMouseEnter={(e) => {
+                        if (!isExtracting && citationUrl) {
+                          e.currentTarget.style.background = 'linear-gradient(135deg, #4ade80 0%, #22c55e 100%)';
+                          e.currentTarget.style.boxShadow = '0 4px 12px rgba(100, 200, 100, 0.4)';
+                        }
+                      }}
+                      onMouseLeave={(e) => {
+                        if (!isExtracting && citationUrl) {
+                          e.currentTarget.style.background = 'linear-gradient(135deg, #64c864 0%, #4ade80 100%)';
+                          e.currentTarget.style.boxShadow = '0 2px 8px rgba(100, 200, 100, 0.3)';
+                        }
+                      }}
+                    >
+                      {isExtracting ? (
+                        <>
+                          <svg className="animate-spin h-4 w-4" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" style={{ color: '#1e1e1e' }}>
+                            <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4" style={{ color: '#1e1e1e' }}></circle>
+                            <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z" style={{ color: '#F5F5DC' }}></path>
+                          </svg>
+                          <span>Extracting...</span>
+                        </>
+                      ) : (
+                        <span>Extract Citations</span>
+                      )}
+                    </button>
+                  </div>
+
+                  {/* Citation Format Selector */}
+                  {rawCitations.length > 0 && (
+                    <div className="mb-4">
+                      <label className="block text-sm font-medium mb-2" style={{ 
+                        color: '#e8e8e8',
+                        fontFamily: '-apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif'
+                      }}>
+                        Citation Format:
+                      </label>
+                      <div className="flex gap-2 flex-wrap">
+                        {(['apa', 'ieee', 'mla', 'chicago', 'plain'] as const).map((format) => (
+                          <button
+                            key={format}
+                            onClick={() => setCitationFormat(format)}
+                            className="px-4 py-2 text-sm font-medium transition-all duration-200 rounded-lg"
+                            style={{
+                              backgroundColor: citationFormat === format ? '#64c864' : '#2d2d2d',
+                              color: citationFormat === format ? '#1e1e1e' : '#e8e8e8',
+                              border: `1px solid ${citationFormat === format ? '#64c864' : 'rgba(100, 200, 100, 0.3)'}`,
+                              fontFamily: '-apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif',
+                              cursor: 'pointer'
+                            }}
+                            onMouseEnter={(e) => {
+                              if (citationFormat !== format) {
+                                e.currentTarget.style.backgroundColor = '#252525';
+                                e.currentTarget.style.borderColor = 'rgba(100, 200, 100, 0.5)';
+                              }
+                            }}
+                            onMouseLeave={(e) => {
+                              if (citationFormat !== format) {
+                                e.currentTarget.style.backgroundColor = '#2d2d2d';
+                                e.currentTarget.style.borderColor = 'rgba(100, 200, 100, 0.3)';
+                              }
+                            }}
+                          >
+                            {format.toUpperCase()}
+                          </button>
+                        ))}
+                      </div>
+                    </div>
+                  )}
+                </div>
+                
+                {citationResults && (
+                  <div className="p-6 rounded-lg border" style={{
+                    backgroundColor: '#2d2d2d',
+                    border: '1px solid rgba(100, 200, 100, 0.3)',
+                    borderRadius: '12px'
+                  }}>
+                    <div className="flex items-center justify-between mb-4">
+                      <h3 className="text-lg font-semibold" style={{ 
+                        color: '#e8e8e8',
+                        fontFamily: '-apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif'
+                      }}>
+                        Extracted Citations ({citationResults.split('\n').length} total) - {citationFormat.toUpperCase()} Format
+                      </h3>
+                      <button
+                        onClick={() => {
+                          navigator.clipboard.writeText(citationResults);
+                          alert('Citations copied to clipboard!');
+                        }}
+                        className="px-4 py-2 text-sm font-medium transition-all duration-200 rounded-lg"
+                        style={{
+                          backgroundColor: '#252525',
+                          color: '#64c864',
+                          border: '1px solid rgba(100, 200, 100, 0.3)',
+                          fontFamily: '-apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif',
+                          cursor: 'pointer'
+                        }}
+                        onMouseEnter={(e) => {
+                          e.currentTarget.style.backgroundColor = '#2d2d2d';
+                          e.currentTarget.style.borderColor = 'rgba(100, 200, 100, 0.5)';
+                        }}
+                        onMouseLeave={(e) => {
+                          e.currentTarget.style.backgroundColor = '#252525';
+                          e.currentTarget.style.borderColor = 'rgba(100, 200, 100, 0.3)';
+                        }}
+                      >
+                        Copy All
+                      </button>
+                    </div>
+                    <div className="space-y-2 max-h-[70vh] overflow-y-auto scrollbar-academic" style={{ 
+                      fontFamily: citationFormat === 'plain' ? 'monospace' : '-apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif', 
+                      fontSize: '14px',
+                      lineHeight: '1.8'
+                    }}>
+                      {citationResults.split('\n').map((citation, index) => (
+                        <div key={index}                         style={{ 
+                          color: '#e8e8e8',
+                          padding: '12px 16px',
+                          backgroundColor: '#252525',
+                          borderRadius: '8px',
+                          border: '1px solid rgba(100, 200, 100, 0.1)',
+                          transition: 'all 0.2s ease',
+                          display: 'flex',
+                          justifyContent: 'space-between',
+                          alignItems: 'center',
+                          gap: '12px'
+                        }}
+                        onMouseEnter={(e) => {
+                          e.currentTarget.style.backgroundColor = '#2a2a2a';
+                          e.currentTarget.style.borderColor = 'rgba(100, 200, 100, 0.2)';
+                        }}
+                        onMouseLeave={(e) => {
+                          e.currentTarget.style.backgroundColor = '#252525';
+                          e.currentTarget.style.borderColor = 'rgba(100, 200, 100, 0.1)';
+                        }}
+                        >
+                          <span style={{ flex: 1, lineHeight: '1.8' }}>{citation}</span>
+                          <button
+                            onClick={(e) => {
+                              e.stopPropagation();
+                              navigator.clipboard.writeText(citation);
+                              // Show temporary feedback
+                              const btn = e.currentTarget;
+                              const originalHTML = btn.innerHTML;
+                              btn.innerHTML = '<span style="font-size: 11px; font-weight: 600;">copied</span>';
+                              btn.style.color = '#64c864';
+                              setTimeout(() => {
+                                btn.innerHTML = originalHTML;
+                                btn.style.color = '#b8b8b8';
+                              }, 1500);
+                            }}
+                            style={{
+                              backgroundColor: 'transparent',
+                              border: 'none',
+                              color: '#b8b8b8',
+                              cursor: 'pointer',
+                              padding: '4px',
+                              display: 'flex',
+                              alignItems: 'center',
+                              justifyContent: 'center',
+                              transition: 'all 0.2s ease',
+                              borderRadius: '4px',
+                              minWidth: '24px',
+                              minHeight: '24px',
+                              flexShrink: 0
+                            }}
+                            onMouseEnter={(e) => {
+                              e.currentTarget.style.backgroundColor = '#2d2d2d';
+                              e.currentTarget.style.color = '#64c864';
+                            }}
+                            onMouseLeave={(e) => {
+                              e.currentTarget.style.backgroundColor = 'transparent';
+                              e.currentTarget.style.color = '#b8b8b8';
+                            }}
+                            title="Copy this citation"
+                          >
+                            <CopyIcon style={{ width: '16px', height: '16px' }} />
+                          </button>
+                        </div>
+                      ))}
+                    </div>
+                  </div>
+                )}
+              </div>
+            </div>
+          )}
+          
+          {!graphData && !isLoading && viewMode === 'graph' && (
             <div className="h-full flex items-center justify-center" style={{ backgroundColor: '#1e1e1e' }}>
               <div className="text-center" style={{ color: '#b8b8b8' }}>
                 <div className="w-20 h-20 mx-auto mb-4 border-4 border-dashed rounded-full flex items-center justify-center" style={{ borderColor: 'rgba(100, 200, 100, 0.3)' }}>
@@ -2322,22 +3147,29 @@ const PaperGraphPage: React.FC<PaperGraphPageProps> = ({ setSessionHandler }) =>
               </div>
             </div>
           )}
-        </div>
       </div>
+    </div>
 
-      {/* Guide Sidebar - Right side sliding panel */}
+      {/* Guide Sidebar - Right side resizable panel */}
       {showGuideSidebar && (
-        <div 
-          className="h-full overflow-hidden border-l-2 transition-all duration-300 ease-in-out"
-          style={{
-            backgroundColor: '#252525',
-            borderColor: 'rgba(100, 200, 100, 0.2)',
-            width: '350px',
-            minWidth: '350px'
+        <ResizableSidebar
+          initialWidth={350}
+          minWidth={250}
+          maxWidth={600}
+          position="right"
+          collapsed={false}
+          onCollapseChange={(collapsed) => {
+            if (collapsed) {
+              setShowGuideSidebar(false);
+            }
           }}
+          onWidthChange={setRightSidebarWidth}
+          collapsedWidth={50}
         >
-          <div className="h-full overflow-y-auto scrollbar-academic p-5">
-            {/* Close Button */}
+          <div className="h-full overflow-y-auto scrollbar-academic p-5" style={{
+            backgroundColor: '#252525',
+          }}>
+            {/* Header with Close Button */}
             <div className="flex items-center justify-between mb-5 pb-3 border-b-2" style={{ borderColor: 'rgba(100, 200, 100, 0.3)' }}>
               <h2 
                 className="text-lg font-semibold"
@@ -2346,8 +3178,8 @@ const PaperGraphPage: React.FC<PaperGraphPageProps> = ({ setSessionHandler }) =>
                   fontFamily: '-apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif'
                 }}
               >
-                Guide
-              </h2>
+                User Guide
+          </h2>
               <button
                 onClick={() => setShowGuideSidebar(false)}
                 className="p-1 rounded transition-colors"
@@ -2363,6 +3195,7 @@ const PaperGraphPage: React.FC<PaperGraphPageProps> = ({ setSessionHandler }) =>
                   e.currentTarget.style.backgroundColor = 'transparent';
                   e.currentTarget.style.color = '#b8b8b8';
                 }}
+                title="Close Guide"
               >
                 <ExpandLessIcon className="w-5 h-5" />
               </button>
@@ -2383,23 +3216,23 @@ const PaperGraphPage: React.FC<PaperGraphPageProps> = ({ setSessionHandler }) =>
                   How to Use
                 </h3>
                 <ol className="text-xs space-y-2 list-decimal list-inside" style={{ color: '#b8b8b8' }}>
-                  <li>Enter paper URLs in the left panel</li>
-                  <li>Configure analysis parameters:
-                    <ul className="ml-4 mt-1 list-disc list-inside space-y-1">
-                      <li>Smart filter: Analyze key sections only</li>
-                      <li>Network depth: How deep to explore</li>
-                    </ul>
-                  </li>
-                  <li>Click "Start Analysis" to begin</li>
-                  <li>Explore the interactive graph</li>
-                  <li>Use advanced tools:
-                    <ul className="ml-4 mt-1 list-disc list-inside space-y-1">
-                      <li>Citation Extractor: Extract citations from papers</li>
-                      <li>Obsidian Sync: Export to knowledge management</li>
-                    </ul>
-                  </li>
-                </ol>
-              </div>
+              <li>Enter paper URLs in the left panel</li>
+              <li>Configure analysis parameters:
+                <ul className="ml-4 mt-1 list-disc list-inside space-y-1">
+                  <li>Smart filter: Analyze key sections only</li>
+                  <li>Network depth: How deep to explore</li>
+                </ul>
+              </li>
+              <li>Click "Start Analysis" to begin</li>
+              <li>Explore the interactive graph</li>
+              <li>Use advanced tools:
+                <ul className="ml-4 mt-1 list-disc list-inside space-y-1">
+                  <li>Citation Extractor: Extract citations from papers</li>
+                  <li>Obsidian Sync: Export to knowledge management</li>
+                </ul>
+              </li>
+            </ol>
+        </div>
 
               {/* Key Features */}
               <div className="p-4 rounded-lg border" style={{
@@ -2414,24 +3247,24 @@ const PaperGraphPage: React.FC<PaperGraphPageProps> = ({ setSessionHandler }) =>
                   Key Features
                 </h3>
                 <ul className="text-xs space-y-2" style={{ color: '#b8b8b8' }}>
-                  <li className="flex items-start">
+              <li className="flex items-start">
                     <PsychologyIcon className="w-4 h-4 mr-2 mt-0.5 flex-shrink-0" style={{ color: '#64c864' }} />
                     <div><strong>AI-Powered Analysis:</strong> Intelligent extraction of academic relationships</div>
-                  </li>
-                  <li className="flex items-start">
+              </li>
+              <li className="flex items-start">
                     <HubIcon className="w-4 h-4 mr-2 mt-0.5 flex-shrink-0" style={{ color: '#64c864' }} />
                     <div><strong>Network Visualization:</strong> Interactive graph showing citation networks</div>
-                  </li>
-                  <li className="flex items-start">
+              </li>
+              <li className="flex items-start">
                     <CenterFocusStrongIcon className="w-4 h-4 mr-2 mt-0.5 flex-shrink-0" style={{ color: '#64c864' }} />
                     <div><strong>Smart Filtering:</strong> Focus on key sections for better insights</div>
-                  </li>
-                  <li className="flex items-start">
+              </li>
+              <li className="flex items-start">
                     <LayersIcon className="w-4 h-4 mr-2 mt-0.5 flex-shrink-0" style={{ color: '#64c864' }} />
                     <div><strong>Multi-Layer Expansion:</strong> Explore citation relationships at multiple depths</div>
-                  </li>
-                </ul>
-              </div>
+              </li>
+            </ul>
+        </div>
 
               {/* Tips */}
               <div className="p-4 rounded-lg border" style={{
@@ -2446,18 +3279,18 @@ const PaperGraphPage: React.FC<PaperGraphPageProps> = ({ setSessionHandler }) =>
                   Tips & Best Practices
                 </h3>
                 <ul className="text-xs space-y-2" style={{ color: '#b8b8b8' }}>
-                  <li>• Use arxiv.org URLs for best results</li>
-                  <li>• Enable smart filtering to reduce noise</li>
-                  <li>• Start with depth 1 for faster analysis</li>
-                  <li>• Use citation extractor for manual verification</li>
-                  <li>• Export to Obsidian for long-term knowledge management</li>
-                </ul>
-              </div>
-            </div>
+              <li>• Use arxiv.org URLs for best results</li>
+              <li>• Enable smart filtering to reduce noise</li>
+              <li>• Start with depth 1 for faster analysis</li>
+              <li>• Use citation extractor for manual verification</li>
+              <li>• Export to Obsidian for long-term knowledge management</li>
+            </ul>
           </div>
         </div>
+          </div>
+        </ResizableSidebar>
       )}
-    </div>
+      </div>
     </div>
   );
 };

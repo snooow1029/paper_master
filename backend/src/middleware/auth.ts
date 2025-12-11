@@ -25,17 +25,23 @@ export const authenticateToken = async (
     const payload = verifyToken(token);
 
     if (!payload) {
+      console.error('❌ Token verification failed:', { token: token?.substring(0, 20) + '...' });
       res.status(401).json({ error: 'Invalid or expired token' });
       return;
     }
+
+    console.log('✅ Token verified, payload:', { userId: payload.userId, email: payload.email });
 
     // Fetch user from database
     const user = await authService.getUserById(payload.userId);
 
     if (!user) {
+      console.error('❌ User not found in database:', payload.userId);
       res.status(401).json({ error: 'User not found' });
       return;
     }
+
+    console.log('✅ User found:', { id: user.id, email: user.email });
 
     // Attach user to request
     (req as any).user = user;
