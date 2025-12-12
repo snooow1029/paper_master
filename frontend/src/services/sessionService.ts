@@ -162,3 +162,31 @@ export async function deleteSession(sessionId: string): Promise<void> {
   }
 }
 
+/**
+ * 删除所有 Sessions
+ */
+export async function deleteAllSessions(): Promise<number> {
+  const token = getAuthToken();
+  if (!token) {
+    throw new Error('未登录');
+  }
+
+  const response = await fetch(`${API_BASE_URL}/api/sessions`, {
+    method: 'DELETE',
+    headers: {
+      'Authorization': `Bearer ${token}`,
+    },
+  });
+
+  if (!response.ok) {
+    if (response.status === 401) {
+      localStorage.removeItem('authToken');
+      throw new Error('登录已过期，请重新登录');
+    }
+    throw new Error('删除所有 Sessions 失败');
+  }
+
+  const result = await response.json();
+  return result.deletedCount || 0;
+}
+

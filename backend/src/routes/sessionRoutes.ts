@@ -26,7 +26,10 @@ router.put('/:id/update-graph', sessionController.updateSessionGraph.bind(sessio
 // Update session
 router.put('/:id', sessionController.updateSession.bind(sessionController));
 
-// Delete session
+// Delete all sessions for current user (must come before /:id)
+router.delete('/', sessionController.deleteAllSessions.bind(sessionController));
+
+// Delete session (must come after DELETE /)
 router.delete('/:id', sessionController.deleteSession.bind(sessionController));
 
 export default router;

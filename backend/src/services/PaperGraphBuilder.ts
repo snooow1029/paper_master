@@ -5,6 +5,7 @@
 
 import { AdvancedCitationService } from './AdvancedCitationService';
 import { PaperRelationshipAnalyzer, PaperMetadata, PaperGraph } from './PaperRelationshipAnalyzer';
+import { SemanticScholarService } from './SemanticScholarService';
 
 export interface PaperInput {
   url: string;
@@ -127,13 +128,31 @@ export class PaperGraphBuilder {
         details: `Analyzing relationships between ${allPapers.length} papers`
       });
       
-      const graph = await this.relationshipAnalyzer.buildRelationshipGraph(allPapers);
+      let graph = await this.relationshipAnalyzer.buildRelationshipGraph(allPapers);
       
       progressCallback?.({
         progress: 85,
         step: 'building',
         currentStep: 'Building graph structure...',
         details: `Created ${graph.nodes.length} nodes and ${graph.edges.length} relationships`
+      });
+
+      // 3.5 獲取並添加 Derivative Works
+      console.log('\n--- Step 3: Fetching Derivative Works ---');
+      progressCallback?.({
+        progress: 90,
+        step: 'building',
+        currentStep: 'Fetching derivative works...',
+        details: 'Querying Semantic Scholar for citing papers'
+      });
+      
+      graph = await this.appendDerivativeWorks(graph, papers);
+      
+      progressCallback?.({
+        progress: 95,
+        step: 'building',
+        currentStep: 'Finalizing graph...',
+        details: `Final graph: ${graph.nodes.length} nodes and ${graph.edges.length} relationships`
       });
 
       const processingTime = Date.now() - startTime;
@@ -301,18 +320,29 @@ export class PaperGraphBuilder {
 
       console.log(`✅ Successfully extracted ${papers.length} papers with filtered citations`);
 
-      // 2.5. 深度引用擴展（網狀發散分析）
+      // 2.5. 深度引用擴展（網狀發散分析）- 限制数量避免节点过多
       let allPapers = papers;
       if (expansionDepth > 0) {
-        console.log(`\n🕸️  Starting network expansion analysis (depth: ${expansionDepth})`);
+        console.log(`\n🕸️  Starting network expansion analysis (depth: ${expansionDepth}, limited to top 30 prior works)`);
         progressCallback?.({
           progress: 50,
           step: 'extracting',
           currentStep: 'Starting citation network expansion...',
-          details: `Expanding network to depth ${expansionDepth} (this may take a while)`
+          details: `Expanding network to depth ${expansionDepth} (limited to top 30 prior works)`
         });
-        allPapers = await this.expandPapersWithCitations(papers, expansionDepth, progressCallback);
-        console.log(`📈 Expanded from ${papers.length} to ${allPapers.length} papers through citation network`);
+        // 限制扩展：最多只取每个输入论文的前 30 个引用
+        const limitedPapers = papers.map(p => ({ ...p, maxCitations: 30 }));
+        allPapers = await this.expandPapersWithCitations(limitedPapers, expansionDepth, progressCallback);
+        console.log(`📈 Expanded from ${papers.length} to ${allPapers.length} papers through citation network (limited)`);
+      } else {
+        // 即使 expansionDepth=0，也要限制引用的数量（只取前 20 个）
+        console.log(`\n📚 Limiting citations to top 20 per paper to avoid too many nodes`);
+        for (const paper of allPapers) {
+          if (paper.citations && paper.citations.length > 20) {
+            paper.citations = paper.citations.slice(0, 20);
+            console.log(`   Limited citations for "${paper.title.substring(0, 50)}..." to 20`);
+          }
+        }
       }
 
       // 3. 分析論文關係
@@ -332,7 +362,7 @@ export class PaperGraphBuilder {
         details: `Analyzing relationships between ${allPapers.length} papers`
       });
       
-      const graph = await this.relationshipAnalyzer.buildRelationshipGraph(allPapers);
+      let graph = await this.relationshipAnalyzer.buildRelationshipGraph(allPapers);
       
       progressCallback?.({
         progress: 85,
@@ -340,6 +370,12 @@ export class PaperGraphBuilder {
         currentStep: 'Building graph structure...',
         details: `Created ${graph.nodes.length} nodes and ${graph.edges.length} relationships`
       });
+      
+      // 3.5 补充 Derivative Works（引用这些论文的后续论文）
+      console.log('\n--- Step 3.5: Fetching Derivative Works (filtered) ---');
+      // NOTE: 不再将 derivative works 添加到 graph 中，避免太多 nodes
+      // Derivative works 应该只在列表中显示（通过 PaperCitationService 获取）
+      // graph = await this.appendDerivativeWorks(graph, papers);
       
       const processingTime = Date.now() - startTime;
       
@@ -508,7 +544,7 @@ export class PaperGraphBuilder {
       papersToProcess.length = 0; // 清空待處理隊列
 
       console.log(`\n📈 Processing depth ${currentDepth}, analyzing ${currentLevelPapers.length} papers`);
-      
+
       progressCallback?.({
         progress: 50 + (currentDepth - 1) * (30 / depth),
         step: 'extracting',
@@ -830,6 +866,144 @@ export class PaperGraphBuilder {
       grobid: grobidReady,
       llm: llmReady
     };
+  }
+
+  /**
+   * 獲取並添加 Derivative Works 到圖中
+   */
+  private async appendDerivativeWorks(graph: PaperGraph, inputPapers: PaperMetadata[]): Promise<PaperGraph> {
+    console.log(`🔍 Fetching derivative works for ${inputPapers.length} papers...`);
+    
+    for (const paper of inputPapers) {
+      try {
+        const arxivId = paper.arxivId;
+        let citingPapers: Array<{
+          id: string; title: string; authors: string[]; year?: string; abstract?: string; url?: string; citationCount?: number;
+        }> = [];
+
+        console.log(`🔍 [Derivative] Processing paper: "${paper.title.substring(0, 50)}..." (arXiv ID: ${arxivId || 'none'})`);
+
+        // 1) 優先用 arXiv ID
+        if (arxivId) {
+          console.log(`   📡 Querying by arXiv ID: ${arxivId}`);
+          try {
+            citingPapers = await SemanticScholarService.getAllCitingPapers(arxivId, {
+              maxResults: 50, // 减少到50，避免太多节点
+              pagesToFetch: 2,
+              fetchAllAvailable: false
+            });
+            console.log(`   ✅ Found ${citingPapers.length} citing papers via arXiv ID`);
+          } catch (error: any) {
+            console.warn(`   ⚠️  arXiv ID query failed:`, error.message);
+          }
+        }
+
+        // 2) 若無 arXiv ID 或查不到，改用 Title+Authors+Year 拿 paperId 再查 citing
+        if (citingPapers.length === 0 && paper.title) {
+          console.log(`   📡 Fallback: Querying by Title+Authors+Year`);
+          try {
+            const search = await SemanticScholarService.queryByTitleAndAuthors(paper.title, paper.authors, paper.year);
+            if (search.success && search.data?.paperId) {
+              console.log(`   ✅ Found paperId: ${search.data.paperId}`);
+              citingPapers = await SemanticScholarService.getAllCitingPapers(search.data.paperId, {
+                maxResults: 50,
+                pagesToFetch: 2,
+                fetchAllAvailable: false
+              });
+              console.log(`   ✅ Found ${citingPapers.length} citing papers via paperId`);
+            } else {
+              console.warn(`   ⚠️  Title search failed:`, search.error);
+            }
+          } catch (error: any) {
+            console.warn(`   ⚠️  Title search error:`, error.message);
+          }
+        }
+
+        if (citingPapers.length === 0) {
+          console.warn(`   ❌ No derivative works found for "${paper.title.substring(0, 50)}..."`);
+          continue;
+        }
+
+        console.log(`📄 Found ${citingPapers.length} derivative works for "${paper.title.substring(0, 50)}..."`);
+
+        // 获取输入论文的节点 ID（需要匹配）
+        const inputPaperNode = graph.nodes.find(n => {
+          // 尝试匹配：通过 ID、URL 或标题
+          return n.id === paper.id || 
+                 (paper.url && n.url === paper.url) ||
+                 (n.title && paper.title && n.title.toLowerCase().trim() === paper.title.toLowerCase().trim());
+        });
+
+        if (!inputPaperNode) {
+          console.warn(`   ⚠️  Could not find input paper node in graph for: ${paper.title.substring(0, 50)}... (ID: ${paper.id})`);
+          continue;
+        }
+
+        const inputNodeId = inputPaperNode.id;
+        console.log(`   ✅ Matched input paper node ID: ${inputNodeId}`);
+
+        for (const citingPaper of citingPapers) {
+          // 生成稳定的节点 ID
+          const derivativeNodeId = citingPaper.id || `derivative_${citingPaper.title.toLowerCase().replace(/[^a-z0-9]/g, '_').substring(0, 50)}`;
+          
+          // 1. 添加節點 (如果不存在)
+          const existingNodeIndex = graph.nodes.findIndex(n => 
+            n.id === derivativeNodeId || 
+            (n.title && citingPaper.title && n.title.toLowerCase().trim() === citingPaper.title.toLowerCase().trim())
+          );
+          
+          if (existingNodeIndex === -1) {
+            graph.nodes.push({
+              id: derivativeNodeId,
+              title: citingPaper.title,
+              authors: citingPaper.authors,
+              year: citingPaper.year || 'Unknown',
+              abstract: citingPaper.abstract,
+              url: citingPaper.url,
+              venue: 'Unknown',
+              citationCount: citingPaper.citationCount ?? undefined,
+              paperCitationCount: citingPaper.citationCount ?? undefined,
+            });
+          } else {
+            // 更新现有节点的 citationCount（如果之前没有）
+            const existingNode = graph.nodes[existingNodeIndex];
+            if (!existingNode.citationCount && citingPaper.citationCount) {
+              existingNode.citationCount = citingPaper.citationCount;
+              existingNode.paperCitationCount = citingPaper.citationCount;
+            }
+          }
+
+          // 2. 添加邊 (Derivative -> Input Paper) - 使用实际的节点 ID
+          const finalDerivativeNodeId = existingNodeIndex >= 0 ? graph.nodes[existingNodeIndex].id : derivativeNodeId;
+          const edgeExists = graph.edges.some(e => 
+            (e.source === finalDerivativeNodeId && e.target === inputNodeId) ||
+            ((e as any).from === finalDerivativeNodeId && (e as any).to === inputNodeId)
+          );
+          
+          if (!edgeExists) {
+            // 基于 citationCount 计算 strength（0.3-1.0）
+            let strength = 0.5; // 默认
+            if (citingPaper.citationCount && citingPaper.citationCount > 0) {
+              // 使用对数缩放：log(1 + citationCount) / log(1 + maxCitation)
+              strength = Math.min(1.0, 0.3 + (Math.log(1 + citingPaper.citationCount) / Math.log(1 + 100000)) * 0.7);
+            }
+            
+            graph.edges.push({
+              source: finalDerivativeNodeId,
+              target: inputNodeId,
+              relationship: 'builds_on',
+              strength: strength,
+              description: 'Cites source paper',
+              evidence: `Citation from Semantic Scholar (${citingPaper.citationCount || 'unknown'} citations)`
+            });
+          }
+        }
+      } catch (error) {
+        console.error(`❌ Failed to fetch derivative works for ${paper.title}:`, error);
+      }
+    }
+    
+    return graph;
   }
 
   /**

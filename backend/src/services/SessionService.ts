@@ -82,6 +82,15 @@ export class SessionService {
   }
 
   /**
+   * Delete all sessions for a user
+   */
+  async deleteAllSessions(userId: string): Promise<number> {
+    const sessionRepository = AppDataSource.getRepository(Session);
+    const result = await sessionRepository.delete({ userId });
+    return result.affected || 0;
+  }
+
+  /**
    * Get full graph data for a session
    */
   async getSessionGraphData(sessionId: string, userId?: string): Promise<GraphData | null> {

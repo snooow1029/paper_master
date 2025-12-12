@@ -5,9 +5,11 @@
 
 import { Router } from 'express';
 import { EnhancedGraphService } from '../services/EnhancedGraphService';
+import { PaperCitationService } from '../services/PaperCitationService';
 
 const router = Router();
 const enhancedGraphService = new EnhancedGraphService();
+const citationService = new PaperCitationService();
 
 /**
  * 構建深度分析的論文關係圖
@@ -39,11 +41,71 @@ router.post('/build', async (req, res) => {
     const duration = Date.now() - startTime;
     console.log(`✅ Enhanced graph completed in ${duration}ms`);
 
+    // 使用 PaperCitationService 获取 Prior Works 和 Derivative Works
+    console.log('\n=== Fetching Prior & Derivative Works via PaperCitationService ===');
+    const priorWorksMap: Record<string, any[]> = {};
+    const derivativeWorksMap: Record<string, any[]> = {};
+    
+    // 并行获取所有论文的 prior 和 derivative works
+    const fetchPromises = papers.map(async (url: string) => {
+      if (!url || !url.trim()) {
+        priorWorksMap[url] = [];
+        derivativeWorksMap[url] = [];
+        return;
+      }
+      
+      try {
+        console.log(`🔍 Fetching prior and derivative works for: ${url}`);
+        
+        // 获取 prior works
+        const priorWorks = await citationService.getPriorWorksFromUrl(url);
+        priorWorksMap[url] = priorWorks.map(work => ({
+          id: work.id || work.url || `prior_${work.title?.toLowerCase().replace(/[^a-z0-9]/g, '_')}`,
+          title: work.title || 'Unknown Title',
+          authors: work.authors || [],
+          year: work.year || 'Unknown',
+          abstract: work.abstract || '',
+          url: work.url || '',
+          citationCount: work.citationCount ?? null, // 使用 null 而不是 0
+          arxivId: work.arxivId || ''
+        }));
+        
+        // 获取 derivative works
+        const derivativeWorks = await citationService.getDerivativeWorksFromUrl(url);
+        derivativeWorksMap[url] = derivativeWorks.map(work => ({
+          id: work.id || work.url || `derivative_${work.title?.toLowerCase().replace(/[^a-z0-9]/g, '_')}`,
+          title: work.title || 'Unknown Title',
+          authors: work.authors || [],
+          year: work.year || 'Unknown',
+          abstract: work.abstract || '',
+          url: work.url || '',
+          citationCount: work.citationCount ?? null, // 使用 null 而不是 0
+          arxivId: work.arxivId || ''
+        }));
+        
+        console.log(`✅ Paper "${url}":`);
+        console.log(`   📚 Prior Works: ${priorWorks.length}`);
+        console.log(`   🔗 Derivative Works: ${derivativeWorks.length}`);
+      } catch (error) {
+        console.error(`❌ Failed to fetch works for ${url}:`, error);
+        priorWorksMap[url] = [];
+        derivativeWorksMap[url] = [];
+      }
+    });
+    
+    await Promise.all(fetchPromises);
+
     res.json({
       success: true,
       graph: enhancedGraph,
       processingTime: duration,
-      message: `Successfully built enhanced graph with ${enhancedGraph.nodes.length} nodes and ${enhancedGraph.edges.length} relationships`
+      message: `Successfully built enhanced graph with ${enhancedGraph.nodes.length} nodes and ${enhancedGraph.edges.length} relationships`,
+      // 添加原始论文的 prior 和 derivative works
+      originalPapers: {
+        urls: papers.filter(u => u && u.trim()),
+        priorWorks: priorWorksMap,
+        derivativeWorks: derivativeWorksMap
+      }
     });
 
   } catch (error) {

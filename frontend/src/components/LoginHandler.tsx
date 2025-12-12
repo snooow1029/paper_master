@@ -62,8 +62,8 @@ export default function LoginHandler() {
       <div
         style={{
           position: 'fixed',
-          top: 20,
-          right: 20,
+          top: 15,
+          right: 25,
           padding: '12px 24px',
           backgroundColor: status === 'success' ? '#10b981' : status === 'error' ? '#ef4444' : '#3b82f6',
           color: 'white',

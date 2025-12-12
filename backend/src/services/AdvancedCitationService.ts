@@ -392,12 +392,20 @@ export class AdvancedCitationService {
       const refId = $ref.attr('xml:id') || '';
       
       const title = $ref.find('analytic title[type="main"], monogr title').first().text().trim();
-      const authors = $ref.find('author persName').map((_, el) => {
-        const $author = $(el);
-        const forename = $author.find('forename').text().trim();
-        const surname = $author.find('surname').text().trim();
-        return `${forename} ${surname}`.trim();
-      }).get();
+      // Extract all authors from bibliography reference
+      // GROBID structure: <author><persName><forename>...</forename><surname>...</surname></persName></author>
+      const authors = $ref.find('author').map((_, authorEl) => {
+        const $author = $(authorEl);
+        const persName = $author.find('persName').first();
+        if (persName.length > 0) {
+          // Handle multiple forenames (e.g., "Quoc V." -> "Quoc V.")
+          const allForenames = persName.find('forename').map((_, fn) => $(fn).text().trim()).get().join(' ');
+          const surname = persName.find('surname').text().trim();
+          return `${allForenames} ${surname}`.trim();
+        }
+        // Fallback to direct text
+        return $author.text().trim();
+      }).get().filter(name => name.length > 0);
       
       const year = $ref.find('date[when]').attr('when') || 
                    $ref.find('date').text().match(/\d{4}/)?.[0] || '';
@@ -463,12 +471,20 @@ export class AdvancedCitationService {
           const title = $bibl.find('title[level="a"]').first().text().trim() ||
                        $bibl.find('title').first().text().trim();
           
-          const authors = $bibl.find('author persName').map((_, author) => {
-            const $author = $(author);
-            const forename = $author.find('forename').text().trim();
-            const surname = $author.find('surname').text().trim();
-            return `${forename} ${surname}`.trim();
-          }).get();
+          // Extract all authors from bibliography entry
+          // GROBID structure: <author><persName><forename>...</forename><surname>...</surname></persName></author>
+          const authors = $bibl.find('author').map((_, authorEl) => {
+            const $author = $(authorEl);
+            const persName = $author.find('persName').first();
+            if (persName.length > 0) {
+              // Handle multiple forenames
+              const allForenames = persName.find('forename').map((_, fn) => $(fn).text().trim()).get().join(' ');
+              const surname = persName.find('surname').text().trim();
+              return `${allForenames} ${surname}`.trim();
+            }
+            // Fallback to direct text
+            return $author.text().trim();
+          }).get().filter(name => name.length > 0);
 
           const year = $bibl.find('date').attr('when') || 
                       $bibl.find('date').text().trim();
@@ -636,7 +652,10 @@ export class AdvancedCitationService {
       }
 
       // Step 3: Parse TEI XML for citations with section filtering
-      const $ = cheerio.load(teiXml, { xmlMode: true });
+      // GROBID uses TEI namespace, but cheerio doesn't handle namespaces well
+      // Remove namespace declarations for easier parsing
+      const teiXmlNoNs = teiXml.replace(/xmlns(?::[^=]*)?="[^"]*"/g, '');
+      const $ = cheerio.load(teiXmlNoNs, { xmlMode: true });
       
       // Debug: Print TEI XML structure for author extraction
       console.log(`\n=== TEI XML Debug Info ===`);
@@ -694,29 +713,74 @@ export class AdvancedCitationService {
                        $('date').attr('when');
       
       // Use the most specific selector that targets only the main paper authors
-      // Based on TEI XML structure: teiHeader > fileDesc > sourceDesc > biblStruct > analytic > author
+      // Based on GROBID TEI XML structure: teiHeader > fileDesc > sourceDesc > biblStruct > analytic > author
+      // GROBID stores each author as: <author><persName><forename>...</forename><surname>...</surname></persName></author>
+      // Note: After removing namespaces, we can use simple selectors
       const authorSelectors = [
-        'teiHeader > fileDesc > sourceDesc > biblStruct > analytic > author persName', // Most specific - main paper only
-        'fileDesc > sourceDesc > biblStruct > analytic > author persName', // Alternative without teiHeader
-        'sourceDesc > biblStruct > analytic > author persName', // More general but still avoids references
+        'teiHeader > fileDesc > sourceDesc > biblStruct > analytic > author', // Most specific - main paper only
+        'fileDesc > sourceDesc > biblStruct > analytic > author', // Alternative without teiHeader
+        'sourceDesc > biblStruct > analytic > author', // More general but still avoids references
+        'biblStruct > analytic > author', // Even more general
+        'analytic > author', // Most general but should work
       ];
       
       for (const selector of authorSelectors) {
         if (paperAuthors.length === 0) {
           console.log(`🔍 Trying author selector: "${selector}"`);
-          paperAuthors = $(selector).map((_, el) => {
-            const $author = $(el);
-            const forename = $author.find('forename').text().trim();
-            const surname = $author.find('surname').text().trim();
-            if (forename || surname) {
-              return `${forename} ${surname}`.trim();
+          const authorElements = $(selector);
+          console.log(`   Found ${authorElements.length} <author> elements with this selector`);
+          
+          paperAuthors = authorElements.map((_, authorEl) => {
+            const $author = $(authorEl);
+            // GROBID structure: <author><persName><forename>First</forename><surname>Last</surname></persName></author>
+            const persName = $author.find('persName').first();
+            if (persName.length > 0) {
+              // Handle multiple forenames (e.g., "Quoc V." -> "Quoc V.")
+              // Also handle middle names (type="middle")
+              const allForenames = persName.find('forename').map((_, fn) => {
+                const $fn = $(fn);
+                return $fn.text().trim();
+              }).get().filter(fn => fn && fn.length > 0).join(' ');
+              
+              const surname = persName.find('surname').text().trim();
+              const fullName = `${allForenames} ${surname}`.trim();
+              
+              // Skip if name looks invalid (e.g., organization names incorrectly parsed)
+              if (fullName.length > 0 && 
+                  fullName !== 'Google Brain' && 
+                  !fullName.match(/^(Google|Facebook|Microsoft|Apple|Amazon)\s+(Brain|Research|AI|Lab)/i)) {
+                return fullName;
+              }
             }
-            // If no forename/surname structure, try getting direct text
-            return $author.text().trim();
-          }).get().filter(name => name.length > 0);
+            // Fallback: try direct text extraction (but filter out invalid names)
+            const directText = $author.text().trim();
+            if (directText.length > 0 && 
+                directText !== 'Google Brain' && 
+                !directText.match(/^(Google|Facebook|Microsoft|Apple|Amazon)\s+(Brain|Research|AI|Lab)/i)) {
+              // Basic validation: should have at least 2 words for a valid name
+              const parts = directText.split(/\s+/).filter(p => p.length > 0);
+              if (parts.length >= 2) {
+                return directText;
+              }
+            }
+            return '';
+          }).get().filter(name => {
+            // Final filter: remove empty, single-word, or obviously invalid names
+            if (!name || name.length === 0) return false;
+            const parts = name.split(/\s+/).filter(p => p.length > 0);
+            if (parts.length < 2) return false;
+            // Filter out organization names that might be incorrectly parsed as authors
+            if (name.match(/^(Google|Facebook|Microsoft|Apple|Amazon)\s+(Brain|Research|AI|Lab)/i)) return false;
+            return true;
+          });
           
           if (paperAuthors.length > 0) {
-            console.log(`📝 Authors found with selector "${selector}": ${paperAuthors.join(', ')}`);
+            console.log(`✅ Found ${paperAuthors.length} authors with selector "${selector}"`);
+            console.log(`   First 3: ${paperAuthors.slice(0, 3).join(', ')}`);
+            console.log(`   Last 3: ${paperAuthors.slice(-3).join(', ')}`);
+            if (paperAuthors.length > 6) {
+              console.log(`   Full list: ${paperAuthors.join(', ')}`);
+            }
             break;
           }
         }
@@ -724,16 +788,23 @@ export class AdvancedCitationService {
       
       // If still no authors found, try more specific fallback methods
       if (paperAuthors.length === 0) {
+        console.log(`⚠️  No authors found with standard selectors, trying fallback methods...`);
         // Try to get authors only from the main document (not from references)
-        const mainDocAuthors = $('teiHeader').find('author persName');
+        const mainDocAuthors = $('teiHeader').find('author');
+        console.log(`   Found ${mainDocAuthors.length} <author> elements in teiHeader`);
         if (mainDocAuthors.length > 0) {
-          paperAuthors = mainDocAuthors.map((_, el) => {
-            const $author = $(el);
-            const forename = $author.find('forename').text().trim();
-            const surname = $author.find('surname').text().trim();
-            return `${forename} ${surname}`.trim();
+          paperAuthors = mainDocAuthors.map((_, authorEl) => {
+            const $author = $(authorEl);
+            const persName = $author.find('persName').first();
+            if (persName.length > 0) {
+              const allForenames = persName.find('forename').map((_, fn) => $(fn).text().trim()).get().join(' ');
+              const surname = persName.find('surname').text().trim();
+              return `${allForenames} ${surname}`.trim();
+            }
+            return $author.text().trim();
           }).get().filter(name => name.length > 0);
-          console.log(`📝 Authors found in teiHeader: ${paperAuthors.join(', ')}`);
+          console.log(`✅ Found ${paperAuthors.length} authors in teiHeader fallback`);
+          console.log(`   Authors: ${paperAuthors.join(', ')}`);
         }
       }
       
@@ -811,14 +882,31 @@ export class AdvancedCitationService {
               }
 
               // 🚀 NEW: Override title, authors, year with Semantic Scholar data if available
+              // BUT: Only override authors if GROBID didn't extract any authors, because GROBID extracts ALL authors
+              // while Semantic Scholar might only return a subset (especially in search results)
               if (semanticScholarData.title && semanticScholarData.title.trim()) {
                 paperTitle = semanticScholarData.title;
                 console.log(`✅ Using Semantic Scholar title: "${paperTitle}"`);
               }
               
-              if (semanticScholarData.authors && semanticScholarData.authors.length > 0) {
+              // Only override authors if GROBID didn't extract any authors
+              // GROBID extracts complete author list from PDF, which is more reliable
+              if (paperAuthors.length === 0 && semanticScholarData.authors && semanticScholarData.authors.length > 0) {
                 paperAuthors = semanticScholarData.authors;
-                console.log(`✅ Using Semantic Scholar authors: ${paperAuthors.join(', ')}`);
+                console.log(`✅ Using Semantic Scholar authors (GROBID had none): ${paperAuthors.length} authors`);
+              } else if (paperAuthors.length > 0 && semanticScholarData.authors && semanticScholarData.authors.length > 0) {
+                // Log comparison but keep GROBID authors (they should be complete)
+                console.log(`📊 Author count comparison - GROBID: ${paperAuthors.length}, Semantic Scholar: ${semanticScholarData.authors.length}`);
+                console.log(`📊 Keeping GROBID authors (complete list from PDF), Semantic Scholar may have truncated list`);
+                if (semanticScholarData.authors.length > paperAuthors.length) {
+                  // Rare case: Semantic Scholar has more authors than GROBID
+                  console.warn(`⚠️  Semantic Scholar has MORE authors (${semanticScholarData.authors.length}) than GROBID (${paperAuthors.length}). This is unusual.`);
+                  console.warn(`    GROBID authors: ${paperAuthors.slice(0, 5).join(', ')}${paperAuthors.length > 5 ? '...' : ''}`);
+                  console.warn(`    Semantic Scholar authors: ${semanticScholarData.authors.slice(0, 5).join(', ')}${semanticScholarData.authors.length > 5 ? '...' : ''}`);
+                  // In this case, prefer Semantic Scholar as it might have more complete data
+                  paperAuthors = semanticScholarData.authors;
+                  console.log(`✅ Using Semantic Scholar authors (more complete): ${paperAuthors.length} authors`);
+                }
               }
               
               if (semanticScholarData.year) {
@@ -836,6 +924,30 @@ export class AdvancedCitationService {
                         $('sourceDesc > biblStruct > monogr title').first().text().trim() || 
                         '';
             venueSource = 'TEI XML (fallback)';
+            
+            // If no arXiv ID but we have title/authors/year, try Semantic Scholar query
+            if (!paperCitationCount && paperTitle && paperAuthors.length > 0) {
+              console.log(`🔍 No arXiv ID found, trying Semantic Scholar query by title+authors+year...`);
+              try {
+                const searchResult = await SemanticScholarService.queryByTitleAndAuthors(
+                  paperTitle,
+                  paperAuthors,
+                  paperYear
+                );
+                if (searchResult.success && searchResult.data?.citationCount !== undefined) {
+                  paperCitationCount = searchResult.data.citationCount;
+                  console.log(`✅ Found citation count via title search: ${paperCitationCount}`);
+                  
+                  // Also update venue if available
+                  if (searchResult.data.venue && !paperVenue) {
+                    paperVenue = searchResult.data.venue;
+                    venueSource = 'Semantic Scholar (title search)';
+                  }
+                }
+              } catch (error) {
+                console.warn(`⚠️  Failed to query Semantic Scholar by title:`, error);
+              }
+            }
           }
         }
       }
@@ -1038,12 +1150,20 @@ export class AdvancedCitationService {
           const title = $bibl.find('title[level="a"]').first().text().trim() ||
                        $bibl.find('title').first().text().trim();
           
-          const authors = $bibl.find('author persName').map((_, author) => {
-            const $author = $(author);
-            const forename = $author.find('forename').text().trim();
-            const surname = $author.find('surname').text().trim();
-            return `${forename} ${surname}`.trim();
-          }).get();
+          // Extract all authors from bibliography entry
+          // GROBID structure: <author><persName><forename>...</forename><surname>...</surname></persName></author>
+          const authors = $bibl.find('author').map((_, authorEl) => {
+            const $author = $(authorEl);
+            const persName = $author.find('persName').first();
+            if (persName.length > 0) {
+              // Handle multiple forenames
+              const allForenames = persName.find('forename').map((_, fn) => $(fn).text().trim()).get().join(' ');
+              const surname = persName.find('surname').text().trim();
+              return `${allForenames} ${surname}`.trim();
+            }
+            // Fallback to direct text
+            return $author.text().trim();
+          }).get().filter(name => name.length > 0);
 
           const year = $bibl.find('date').attr('when') || 
                       $bibl.find('date').text().trim();

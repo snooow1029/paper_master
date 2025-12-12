@@ -3,6 +3,8 @@ import { GraphData } from '../types/graph';
 
 interface UseLoadSessionResult {
   graphData: GraphData | null;
+  priorWorks: Record<string, any[]>;
+  derivativeWorks: Record<string, any[]>;
   loading: boolean;
   error: string | null;
 }
@@ -13,12 +15,16 @@ interface UseLoadSessionResult {
  */
 export function useLoadSession(sessionId: string | null): UseLoadSessionResult {
   const [graphData, setGraphData] = useState<GraphData | null>(null);
+  const [priorWorks, setPriorWorks] = useState<Record<string, any[]>>({});
+  const [derivativeWorks, setDerivativeWorks] = useState<Record<string, any[]>>({});
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
   useEffect(() => {
     if (!sessionId) {
       setGraphData(null);
+      setPriorWorks({});
+      setDerivativeWorks({});
       setLoading(false);
       setError(null);
       return;
@@ -49,13 +55,19 @@ export function useLoadSession(sessionId: string | null): UseLoadSessionResult {
 
         const data = await response.json();
         const rawGraphData = data.graphData;
+        const priorWorks = data.priorWorks || {};
+        const derivativeWorks = data.derivativeWorks || {};
 
         console.log(`\n🟡 ========== FRONTEND LOAD SESSION START ==========`);
         console.log(`📥 Session ID: ${sessionId}`);
         console.log(`📥 Raw response data:`, {
           hasGraphData: !!rawGraphData,
           nodesCount: rawGraphData?.nodes?.length || 0,
-          edgesCount: rawGraphData?.edges?.length || 0
+          edgesCount: rawGraphData?.edges?.length || 0,
+          hasPriorWorks: !!priorWorks,
+          hasDerivativeWorks: !!derivativeWorks,
+          priorWorksKeys: priorWorks ? Object.keys(priorWorks) : [],
+          derivativeWorksKeys: derivativeWorks ? Object.keys(derivativeWorks) : []
         });
 
         if (!rawGraphData) {
@@ -76,6 +88,14 @@ export function useLoadSession(sessionId: string | null): UseLoadSessionResult {
         // Sanitize graph data: ensure all IDs are strings
         const sanitizedGraphData = sanitizeGraphData(rawGraphData);
         
+        // 添加 priorWorks 和 derivativeWorks 到 graphData
+        if (priorWorks || derivativeWorks) {
+          (sanitizedGraphData as any).originalPapers = {
+            priorWorks: priorWorks,
+            derivativeWorks: derivativeWorks
+          };
+        }
+        
         console.log(`🔄 After sanitization: ${sanitizedGraphData.nodes.length} nodes, ${sanitizedGraphData.edges.length} edges`);
         if (sanitizedGraphData.edges.length > 0) {
           console.log(`🔄 Sanitized edges sample (first 3):`, sanitizedGraphData.edges.slice(0, 3).map((e: any) => ({
@@ -87,13 +107,25 @@ export function useLoadSession(sessionId: string | null): UseLoadSessionResult {
         }
 
         setGraphData(sanitizedGraphData);
+        setPriorWorks(priorWorks || {});
+        setDerivativeWorks(derivativeWorks || {});
         console.log(`✅ Loaded session ${sessionId}: ${sanitizedGraphData.nodes.length} nodes, ${sanitizedGraphData.edges.length} edges`);
+        if (priorWorks && Object.keys(priorWorks).length > 0) {
+          const priorCount = Object.values(priorWorks).flat().length;
+          console.log(`✅ Loaded ${priorCount} prior works from history across ${Object.keys(priorWorks).length} papers`);
+        }
+        if (derivativeWorks && Object.keys(derivativeWorks).length > 0) {
+          const derivativeCount = Object.values(derivativeWorks).flat().length;
+          console.log(`✅ Loaded ${derivativeCount} derivative works from history across ${Object.keys(derivativeWorks).length} papers`);
+        }
         console.log(`🟡 ========== FRONTEND LOAD SESSION END ==========\n`);
       } catch (err) {
         const errorMessage = err instanceof Error ? err.message : 'Unknown error occurred';
         console.error('❌ Failed to load session:', errorMessage);
         setError(errorMessage);
         setGraphData(null);
+        setPriorWorks({});
+        setDerivativeWorks({});
       } finally {
         setLoading(false);
       }
@@ -102,7 +134,7 @@ export function useLoadSession(sessionId: string | null): UseLoadSessionResult {
     loadSession();
   }, [sessionId]);
 
-  return { graphData, loading, error };
+  return { graphData, priorWorks, derivativeWorks, loading, error };
 }
 
 /**

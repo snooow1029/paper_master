@@ -114,7 +114,7 @@ router.get(
           console.warn('⚠️  Redirecting to frontend home page...');
           
           // Ensure FRONTEND_URL has no trailing slash
-          const baseUrl = (process.env.FRONTEND_URL || 'https://paper-master.vercel.app').replace(/\/$/, '');
+          const baseUrl = (process.env.FRONTEND_URL || 'http://localhost:3000').replace(/\/$/, '');
           const redirectUrl = `${baseUrl}/`;
           
           console.log('🚀 Redirecting to (invalid_grant):', redirectUrl);

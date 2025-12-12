@@ -324,7 +324,7 @@ const NodeInfoPanel: React.FC<NodeInfoPanelProps> = ({
           ) : null}
         </div>
       )}
-
+      
       <div className="flex gap-2">
         <button
           onClick={onEdit}

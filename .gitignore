@@ -94,6 +94,7 @@ test_performance.py
 # Backup files
 *.bak
 *.backup
+.backup-before-merge/
 
 *.md
 

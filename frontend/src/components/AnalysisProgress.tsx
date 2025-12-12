@@ -23,10 +23,10 @@ const AnalysisProgress: React.FC<AnalysisProgressProps> = ({
   const [expanded, setExpanded] = useState(false);
 
   const stepLabels: Record<string, string> = {
-    'initializing': '初始化',
-    'extracting': '提取論文',
-    'analyzing': '分析關係',
-    'building': '構建圖表'
+    'initializing': 'Initializing',
+    'extracting': 'Extracting Papers',
+    'analyzing': 'Analyzing Relationships',
+    'building': 'Building Graph'
   };
 
   const currentStepLabel = progressInfo?.step ? stepLabels[progressInfo.step] || progressInfo.step : '';
@@ -148,7 +148,7 @@ const AnalysisProgress: React.FC<AnalysisProgressProps> = ({
             }}
           >
             {expanded ? <ExpandLessIcon style={{ fontSize: '16px' }} /> : <ExpandMoreIcon style={{ fontSize: '16px' }} />}
-            {expanded ? '隱藏詳細信息' : '顯示詳細信息'}
+            {expanded ? 'Hide Details' : 'Show Details'}
           </button>
           {expanded && (
             <div style={{
