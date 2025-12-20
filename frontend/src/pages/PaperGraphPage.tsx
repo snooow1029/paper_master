@@ -173,6 +173,14 @@ const PaperGraphPage: React.FC<PaperGraphPageProps> = ({ setSessionHandler }) =>
   const [showObsidianSync, setShowObsidianSync] = useState(false);
   const [obsidianPath, setObsidianPath] = useState('');
   const [obsidianSubfolder, setObsidianSubfolder] = useState('');
+  const [obsidianSyncMode, setObsidianSyncMode] = useState<'local' | 'zip' | 'rest'>('local');
+  const [obsidianApiKey, setObsidianApiKey] = useState(() => {
+    // Load API key from localStorage
+    return localStorage.getItem('obsidian_api_key') || '';
+  });
+  const [obsidianApiUrl, setObsidianApiUrl] = useState('http://127.0.0.1:27123');
+  const [isCheckingApi, setIsCheckingApi] = useState(false);
+  const [apiAvailable, setApiAvailable] = useState<boolean | null>(null);
   const [isSyncing, setIsSyncing] = useState(false);
   const [syncStatus, setSyncStatus] = useState<string | null>(null);
 
@@ -1638,6 +1646,421 @@ const PaperGraphPage: React.FC<PaperGraphPageProps> = ({ setSessionHandler }) =>
     }
   }, [citationFormat, rawCitations]);
 
+  // Check if Obsidian REST API is available
+  const checkObsidianApi = async () => {
+    setIsCheckingApi(true);
+    try {
+      // Ensure API URL is correct (remove trailing slash if present)
+      const apiBaseUrl = obsidianApiUrl.trim().replace(/\/$/, '');
+      
+      if (!apiBaseUrl || !obsidianApiKey.trim()) {
+        setApiAvailable(false);
+        setIsCheckingApi(false);
+        return;
+      }
+      
+      // Try /vault/ with trailing slash (some APIs require it)
+      const testUrl = `${apiBaseUrl}/vault/`;
+      console.log(`Checking Obsidian API: ${testUrl}`);
+      console.log(`API Key provided: ${obsidianApiKey ? 'Yes (' + obsidianApiKey.length + ' chars)' : 'No'}`);
+      
+      const response = await fetch(testUrl, {
+        method: 'GET',
+        headers: {
+          'Authorization': `Bearer ${obsidianApiKey}`,
+          'Content-Type': 'application/json',
+        },
+        signal: AbortSignal.timeout(3000), // 3 second timeout
+      });
+      
+      setApiAvailable(response.ok);
+      if (!response.ok) {
+        console.error('Obsidian API check failed:', response.status, response.statusText);
+        const errorText = await response.text();
+        console.error('Error response:', errorText);
+      } else {
+        console.log('✅ Obsidian REST API is available');
+      }
+    } catch (error) {
+      setApiAvailable(false);
+      console.error('Obsidian REST API not available:', error);
+      if (error instanceof Error) {
+        console.error('Error details:', error.message);
+      }
+    } finally {
+      setIsCheckingApi(false);
+    }
+  };
+
+  // Save API key to localStorage
+  const saveApiKey = (key: string) => {
+    setObsidianApiKey(key);
+    localStorage.setItem('obsidian_api_key', key);
+  };
+
+  // Sync to Obsidian via REST API (browser-side)
+  const syncToObsidianViaApi = async () => {
+    if (!graphData) {
+      setSyncStatus('❌ 沒有圖數據可同步');
+      setTimeout(() => setSyncStatus(null), 3000);
+      return;
+    }
+
+    if (!obsidianApiKey.trim()) {
+      setSyncStatus('❌ 請輸入 Obsidian REST API Key');
+      setTimeout(() => setSyncStatus(null), 3000);
+      return;
+    }
+
+    // Validate API URL
+    const apiBaseUrl = obsidianApiUrl.trim().replace(/\/$/, '');
+    if (!apiBaseUrl || !apiBaseUrl.startsWith('http://127.0.0.1') && !apiBaseUrl.startsWith('http://localhost')) {
+      setSyncStatus('❌ API URL 格式錯誤，應為 http://127.0.0.1:27123 或 http://localhost:27123');
+      setTimeout(() => setSyncStatus(null), 5000);
+      return;
+    }
+
+    console.log('🔗 Using Obsidian API URL:', apiBaseUrl);
+    console.log('🔑 API Key length:', obsidianApiKey.length);
+
+    setIsSyncing(true);
+    setSyncStatus('正在通過 REST API 同步到 Obsidian...');
+
+    try {
+      // Generate markdown content for each paper
+      const paperFolder = obsidianSubfolder.trim() 
+        ? `Papers/${obsidianSubfolder.trim()}` 
+        : 'Papers';
+      const graphFolder = obsidianSubfolder.trim()
+        ? `Paper_Graphs/${obsidianSubfolder.trim()}`
+        : 'Paper_Graphs';
+
+      let successCount = 0;
+      let errorCount = 0;
+
+      // Create individual paper files
+      for (const node of graphData.nodes) {
+        try {
+          // Generate markdown content (simplified version)
+          const paperContent = generatePaperMarkdown(node, graphData);
+          const nodeTitle = node.title || node.label || String(node.id);
+          const safeFileName = nodeTitle
+            .replace(/[<>:"/\\|?*]/g, '')
+            .replace(/\s+/g, '_')
+            .substring(0, 80);
+
+          // Ensure API URL is correct (remove trailing slash if present)
+          const apiBaseUrl = obsidianApiUrl.trim().replace(/\/$/, '');
+          // Obsidian REST API expects path without leading slash in vault endpoint
+          const filePath = `${paperFolder}/${safeFileName}.md`;
+          const fullUrl = `${apiBaseUrl}/vault/${filePath}`;
+          
+          console.log(`📝 Creating file via REST API: ${fullUrl}`);
+          console.log(`📝 File path: ${filePath}`);
+          console.log(`🔑 Using API Key: ${obsidianApiKey.substring(0, 10)}...`);
+          
+          const response = await fetch(fullUrl, {
+            method: 'POST',
+            headers: {
+              'Authorization': `Bearer ${obsidianApiKey}`,
+              'Content-Type': 'text/markdown',
+            },
+            body: paperContent,
+          });
+
+          if (response.ok) {
+            successCount++;
+            console.log(`✅ Successfully created: ${safeFileName}.md`);
+          } else {
+            errorCount++;
+            const errorText = await response.text().catch(() => '');
+            console.error(`❌ Failed to create ${safeFileName}.md:`, {
+              status: response.status,
+              statusText: response.statusText,
+              error: errorText,
+              url: fullUrl
+            });
+          }
+        } catch (error) {
+          errorCount++;
+          console.error(`Error creating paper ${node.title}:`, error);
+        }
+      }
+
+      // Create overview file
+      try {
+        const overviewContent = generateGraphOverview(graphData, `Paper Graph ${new Date().toLocaleDateString()}`);
+        const timestamp = new Date().toISOString().split('T')[0];
+        const overviewFileName = `Paper_Graph_${timestamp}.md`;
+        
+        // Ensure API URL is correct (remove trailing slash if present)
+        const apiBaseUrl = obsidianApiUrl.trim().replace(/\/$/, '');
+        const overviewPath = `${graphFolder}/${overviewFileName}`;
+        const overviewUrl = `${apiBaseUrl}/vault/${overviewPath}`;
+        
+        console.log(`📝 Creating overview file via REST API: ${overviewUrl}`);
+        
+        const overviewResponse = await fetch(overviewUrl, {
+          method: 'POST',
+          headers: {
+            'Authorization': `Bearer ${obsidianApiKey}`,
+            'Content-Type': 'text/markdown',
+          },
+          body: overviewContent,
+        });
+        
+        if (overviewResponse.ok) {
+          console.log(`✅ Successfully created overview file: ${overviewFileName}`);
+        } else {
+          const errorText = await overviewResponse.text().catch(() => '');
+          console.error(`❌ Failed to create overview file:`, {
+            status: overviewResponse.status,
+            statusText: overviewResponse.statusText,
+            error: errorText,
+            url: overviewUrl
+          });
+        }
+      } catch (error) {
+        console.error('Error creating overview file:', error);
+      }
+
+      if (errorCount === 0) {
+        setSyncStatus(`✅ 同步成功: ${successCount} 篇論文已寫入 Obsidian`);
+      } else {
+        setSyncStatus(`⚠️ 部分成功: ${successCount} 篇成功, ${errorCount} 篇失敗`);
+      }
+    } catch (error) {
+      console.error('Obsidian REST API sync error:', error);
+      setSyncStatus(`❌ 同步失敗: ${error instanceof Error ? error.message : '未知錯誤'}`);
+    } finally {
+      setIsSyncing(false);
+      setTimeout(() => setSyncStatus(null), 5000);
+    }
+  };
+
+  // Helper function to generate paper markdown
+  const generatePaperMarkdown = (node: any, graphData: any): string => {
+    const nodeId = node.id;
+    const incomingEdges = graphData.edges.filter((e: any) => {
+      const targetId = typeof e.target === 'string' ? e.target : (e.target?.id || e.target);
+      return targetId === nodeId;
+    });
+    const outgoingEdges = graphData.edges.filter((e: any) => {
+      const sourceId = typeof e.source === 'string' ? e.source : (e.source?.id || e.source);
+      return sourceId === nodeId;
+    });
+
+    const nodeTitle = node.title || node.label || String(node.id);
+    const authors = node.authors?.length > 0 ? node.authors : ['Unknown'];
+    const authorsYaml = authors.map((a: string) => `  - "${a}"`).join('\n');
+
+    return `---
+title: "${nodeTitle}"
+year: ${node.year || 'Unknown'}
+authors:
+${authorsYaml}
+tags: [Paper, Research]
+url: "${node.url || ''}"
+---
+
+# ${nodeTitle}
+
+## Abstract
+${node.abstract || '無摘要資訊'}
+
+---
+
+## Relationships
+
+### Cites (Outgoing Links)
+${outgoingEdges.length > 0 ? outgoingEdges.map((edge: any) => {
+  const targetId = typeof edge.target === 'string' ? edge.target : (edge.target?.id || edge.target);
+  const targetNode = graphData.nodes.find((n: any) => n.id === targetId);
+  const targetTitle = targetNode?.title || targetNode?.label || 'Unknown';
+  return `- **[[${targetTitle}]]**`;
+}).join('\n') : '- No outgoing citations found'}
+
+### Cited By (Incoming Links)
+${incomingEdges.length > 0 ? incomingEdges.map((edge: any) => {
+  const sourceId = typeof edge.source === 'string' ? edge.source : (edge.source?.id || edge.source);
+  const sourceNode = graphData.nodes.find((n: any) => n.id === sourceId);
+  const sourceTitle = sourceNode?.title || sourceNode?.label || 'Unknown';
+  return `- **[[${sourceTitle}]]**`;
+}).join('\n') : '- No incoming citations found'}
+
+---
+
+*Auto-generated at ${new Date().toLocaleString('zh-TW')}*
+`;
+  };
+
+  // Helper function to generate graph overview (full version with all visualizations)
+  const generateGraphOverview = (graphData: any, graphName: string): string => {
+    // Get relationship statistics
+    const relationshipCounts: { [key: string]: number } = {};
+    graphData.edges.forEach((edge: any) => {
+      const relType = edge.relationship || 'related';
+      relationshipCounts[relType] = (relationshipCounts[relType] || 0) + 1;
+    });
+    const relationshipStats = Object.entries(relationshipCounts)
+      .map(([type, count]) => `- **${type}**: ${count}`)
+      .join('\n');
+
+    // Helper to sanitize node ID for Mermaid
+    const sanitizeNodeId = (title: string | undefined): string => {
+      if (!title || typeof title !== 'string') return 'unknown';
+      return title.replace(/[^a-zA-Z0-9\u4e00-\u9fff]/g, '').substring(0, 10);
+    };
+
+    // Helper to truncate title
+    const truncateTitle = (title: string, maxLength: number): string => {
+      if (title.length <= maxLength) return title;
+      return title.substring(0, maxLength - 3) + '...';
+    };
+
+    return `---
+title: "${graphName}"
+type: "Knowledge Graph Overview"
+tags: [Graph, Overview, Research]
+cssclasses: [juggl-graph-overview]
+papers_count: ${graphData.nodes.length}
+relationships_count: ${graphData.edges.length}
+generated_date: "${new Date().toISOString()}"
+---
+
+# ${graphName}
+
+## 📊 Graph Statistics
+- **Papers Count**: ${graphData.nodes.length}
+- **Relationships Count**: ${graphData.edges.length}
+- **Generated**: ${new Date().toLocaleString('zh-TW')}
+
+## 📚 Papers in This Graph
+\`\`\`dataview
+TABLE 
+  authors as "Authors",
+  year as "Year",
+  length(file.outlinks) as "Citations Out",
+  length(file.inlinks) as "Citations In"
+FROM #Paper 
+SORT year DESC
+\`\`\`
+
+### Paper List
+${graphData.nodes.map((node: any) => {
+  const nodeTitle = node.title || node.label || String(node.id);
+  const year = node.year ? `(${node.year})` : '';
+  const authors = node.authors?.length > 0 ? node.authors.join(', ') : 'Unknown';
+  return `- **[[${nodeTitle}]]** ${year} - ${authors}`;
+}).join('\n')}
+
+## 🔗 Relationship Analysis
+
+### Relationship Type Distribution
+${relationshipStats}
+
+### Detailed Relationships
+\`\`\`dataview
+TABLE 
+  file.link as "Source Paper",
+  choice(type, type, "references") as "Relationship Type",
+  strength as "Strength"
+FROM [[]]
+WHERE contains(tags, "Paper")
+FLATTEN file.outlinks as outlink
+FLATTEN outlink.type as type
+FLATTEN outlink.strength as strength
+SORT strength DESC
+\`\`\`
+
+## 🎨 Interactive Visualization
+
+### Mermaid Network Diagram
+\`\`\`mermaid
+graph TD
+${graphData.edges.map((edge: any) => {
+  const sourceId = typeof edge.source === 'string' ? edge.source : (edge.source?.id || edge.source);
+  const targetId = typeof edge.target === 'string' ? edge.target : (edge.target?.id || edge.target);
+  const sourceNode = graphData.nodes.find((n: any) => n.id === sourceId);
+  const targetNode = graphData.nodes.find((n: any) => n.id === targetId);
+  const sourceTitle = sourceNode?.title || sourceNode?.label || 'Unknown';
+  const targetTitle = targetNode?.title || targetNode?.label || 'Unknown';
+  const sourceLabel = sanitizeNodeId(sourceTitle);
+  const targetLabel = sanitizeNodeId(targetTitle);
+      const sourceTitleShort = truncateTitle(sourceTitle, 30);
+      const targetTitleShort = truncateTitle(targetTitle, 30);
+      const relationshipLabel = edge.relationship || 'related';
+      return `    ${sourceLabel}["${sourceTitleShort}"] -->|${relationshipLabel}| ${targetLabel}["${targetTitleShort}"]
+    style ${sourceLabel} fill:#64c864,stroke:#2d5016,stroke-width:2px
+    style ${targetLabel} fill:#64c864,stroke:#2d5016,stroke-width:2px`;
+}).join('\n')}
+
+classDef paper fill:#64c864,stroke:#2d5016,stroke-width:2px,color:#fff
+classDef cited fill:#7b68ee,stroke:#4b0082,stroke-width:2px,color:#fff
+\`\`\`
+
+### Obsidian Graph View
+> **Tip**: Open this note in Obsidian and use the built-in Graph View (Ctrl+G / Cmd+G) to see an interactive visualization of all paper relationships. The graph will automatically show connections based on the \`[[links]]\` in each paper file.
+
+### Juggl Interactive Graph
+\`\`\`juggl
+${graphData.nodes.map((node: any) => {
+  const nodeId = sanitizeNodeId(node.title || node.label);
+  const outgoing = graphData.edges
+    .filter((e: any) => {
+      const sourceId = typeof e.source === 'string' ? e.source : (e.source?.id || e.source);
+      return sourceId === node.id;
+    })
+    .map((e: any) => {
+      const targetId = typeof e.target === 'string' ? e.target : (e.target?.id || e.target);
+      const target = graphData.nodes.find((n: any) => n.id === targetId);
+      return target ? sanitizeNodeId(target.title || target.label) : null;
+    })
+    .filter(Boolean)
+    .join(',');
+  return outgoing ? `  ${nodeId} -> {${outgoing}}` : null;
+}).filter(Boolean).join('\n')}
+\`\`\`
+
+## 📋 Relationship Details
+${graphData.edges.map((edge: any, index: number) => {
+  const sourceId = typeof edge.source === 'string' ? edge.source : (edge.source?.id || edge.source);
+  const targetId = typeof edge.target === 'string' ? edge.target : (edge.target?.id || edge.target);
+  const sourceNode = graphData.nodes.find((n: any) => n.id === sourceId);
+  const targetNode = graphData.nodes.find((n: any) => n.id === targetId);
+  const sourceTitle = sourceNode?.title || sourceNode?.label || `Unknown (ID: ${sourceId})`;
+  const targetTitle = targetNode?.title || targetNode?.label || `Unknown (ID: ${targetId})`;
+  const strength = edge.strength ? ` (強度: ${edge.strength.toFixed(2)})` : '';
+  const evidence = edge.evidence ? `\n  - **Evidence**: ${edge.evidence}` : '';
+  const description = edge.description ? `\n  - **Description**: ${edge.description}` : '';
+  return `### Relationship ${index + 1}: ${edge.relationship || 'related'}
+- **Source**: [[${sourceTitle}]]
+- **Target**: [[${targetTitle}]]${strength}${evidence}${description}`;
+}).join('\n\n')}
+
+## 🎯 Juggl Configuration
+> **For Juggl Plugin**: 
+> - Install the [Juggl plugin](https://github.com/HEmile/juggl) from Obsidian Community Plugins
+> - Node styles are defined via \`cssclasses: [juggl-node-paper]\`
+> - Relationship types are stored in \`type::\` fields
+> - Strength values are available in \`strength::\` fields
+> - Use the Juggl code block above to render an interactive graph view
+> - Click on any paper node to see its details and relationships
+
+### How to View the Graph:
+1. **Obsidian Native Graph View**: Press \`Ctrl+G\` (Windows/Linux) or \`Cmd+G\` (Mac) to open the global graph view
+2. **Juggl Plugin**: Install Juggl from Community Plugins, then open this note to see the interactive graph
+3. **Mermaid Diagram**: The Mermaid diagram above renders automatically in Obsidian
+
+## 📝 My Analysis Notes
+<!-- Add your manual analysis and insights here -->
+
+---
+*Knowledge graph auto-generated on ${new Date().toLocaleString('zh-TW')}*
+*Compatible with Obsidian Juggl & Dataview plugins*
+`;
+  };
+
   // Obsidian sync functionality
   const syncToObsidian = async () => {
     if (!graphData) {
@@ -1646,14 +2069,21 @@ const PaperGraphPage: React.FC<PaperGraphPageProps> = ({ setSessionHandler }) =>
       return;
     }
 
-    if (!obsidianPath.trim()) {
+    // For REST API mode, use browser-side sync
+    if (obsidianSyncMode === 'rest') {
+      await syncToObsidianViaApi();
+      return;
+    }
+
+    // For local mode, require vault path
+    if (obsidianSyncMode === 'local' && !obsidianPath.trim()) {
       setSyncStatus('❌ 請輸入 Obsidian vault 路徑');
       setTimeout(() => setSyncStatus(null), 3000);
       return;
     }
 
     setIsSyncing(true);
-    setSyncStatus('正在同步到 Obsidian...');
+    setSyncStatus(obsidianSyncMode === 'zip' ? '正在生成 ZIP 文件...' : '正在同步到 Obsidian...');
 
     try {
       // Convert frontend GraphData format to backend expected format
@@ -1689,12 +2119,14 @@ const PaperGraphPage: React.FC<PaperGraphPageProps> = ({ setSessionHandler }) =>
         }),
       };
 
-      // Build vault path with subfolder if provided
-      // Remove quotes and trim whitespace
-      let finalVaultPath = obsidianPath.trim().replace(/^["']|["']$/g, '');
-      if (obsidianSubfolder.trim()) {
-        const subfolder = obsidianSubfolder.trim().replace(/^["']|["']$/g, '');
-        finalVaultPath = `${finalVaultPath}/${subfolder}`;
+      // Build vault path with subfolder if provided (only for local mode)
+      let finalVaultPath: string | undefined = undefined;
+      if (obsidianSyncMode === 'local') {
+        finalVaultPath = obsidianPath.trim().replace(/^["']|["']$/g, '');
+        if (obsidianSubfolder.trim()) {
+          const subfolder = obsidianSubfolder.trim().replace(/^["']|["']$/g, '');
+          finalVaultPath = `${finalVaultPath}/${subfolder}`;
+        }
       }
 
       const token = localStorage.getItem('authToken');
@@ -1712,15 +2144,35 @@ const PaperGraphPage: React.FC<PaperGraphPageProps> = ({ setSessionHandler }) =>
           graphData: backendGraphData,
           graphName: `Paper Graph ${new Date().toLocaleDateString()}`,
           vaultPath: finalVaultPath,
+          exportMode: obsidianSyncMode,
         }),
       });
 
-      const result = await response.json();
-
-      if (result.success) {
-        setSyncStatus(`✅ ${result.message}`);
+      // Handle ZIP download
+      if (obsidianSyncMode === 'zip') {
+        if (response.ok) {
+          const blob = await response.blob();
+          const url = window.URL.createObjectURL(blob);
+          const a = document.createElement('a');
+          a.href = url;
+          a.download = `Paper_Graph_${new Date().toISOString().split('T')[0]}.zip`;
+          document.body.appendChild(a);
+          a.click();
+          window.URL.revokeObjectURL(url);
+          document.body.removeChild(a);
+          setSyncStatus('✅ ZIP 文件下載成功！請解壓到您的 Obsidian vault 文件夾');
+        } else {
+          const result = await response.json();
+          setSyncStatus(`❌ 生成失敗: ${result.error || result.message || '未知錯誤'}`);
+        }
       } else {
-        setSyncStatus(`❌ 同步失敗: ${result.error || result.message || '未知錯誤'}`);
+        // Handle local sync
+        const result = await response.json();
+        if (result.success) {
+          setSyncStatus(`✅ ${result.message}`);
+        } else {
+          setSyncStatus(`❌ 同步失敗: ${result.error || result.message || '未知錯誤'}`);
+        }
       }
     } catch (error) {
       console.error('Obsidian sync error:', error);
@@ -1945,82 +2397,333 @@ const PaperGraphPage: React.FC<PaperGraphPageProps> = ({ setSessionHandler }) =>
 
             {showObsidianSync && (
               <div className="mt-3 space-y-3">
+                {/* Sync Mode Selection */}
                 <div className="space-y-2">
-                  <input
-                    type="text"
-                    value={obsidianPath}
-                    onChange={(e) => setObsidianPath(e.target.value)}
-                    placeholder="Obsidian vault path (e.g., C:\Users\YourName\Documents\MyVault)"
-                    className="form-input w-full text-sm focus:outline-none"
-                    style={{
-                      borderColor: 'rgba(100, 200, 100, 0.3)',
-                      backgroundColor: '#2d2d2d',
-                      color: '#e8e8e8',
-                      borderRadius: '8px',
-                      padding: '8px 12px'
-                    }}
-                  />
-                  <input
-                    type="text"
-                    value={obsidianSubfolder}
-                    onChange={(e) => setObsidianSubfolder(e.target.value)}
-                    placeholder="Subfolder name (optional)"
-                    className="form-input w-full text-sm focus:outline-none"
-                    style={{
-                      borderColor: 'rgba(100, 200, 100, 0.3)',
-                      backgroundColor: '#2d2d2d',
-                      color: '#e8e8e8',
-                      borderRadius: '8px',
-                      padding: '8px 12px'
-                    }}
-                  />
+                  <label className="text-xs font-medium" style={{ color: '#b8b8b8' }}>
+                    同步模式
+                  </label>
+                  <div className="grid grid-cols-3 gap-2">
+                    <button
+                      type="button"
+                      onClick={() => setObsidianSyncMode('local')}
+                      className="px-3 py-2 rounded text-sm font-medium transition-all"
+                      style={{
+                        backgroundColor: obsidianSyncMode === 'local' ? '#64c864' : '#2d2d2d',
+                        color: obsidianSyncMode === 'local' ? '#1e1e1e' : '#e8e8e8',
+                        border: `1px solid ${obsidianSyncMode === 'local' ? '#64c864' : 'rgba(100, 200, 100, 0.3)'}`,
+                      }}
+                    >
+                      本地路徑
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => setObsidianSyncMode('zip')}
+                      className="px-3 py-2 rounded text-sm font-medium transition-all"
+                      style={{
+                        backgroundColor: obsidianSyncMode === 'zip' ? '#64c864' : '#2d2d2d',
+                        color: obsidianSyncMode === 'zip' ? '#1e1e1e' : '#e8e8e8',
+                        border: `1px solid ${obsidianSyncMode === 'zip' ? '#64c864' : 'rgba(100, 200, 100, 0.3)'}`,
+                      }}
+                    >
+                      📁 下載 ZIP
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => {
+                        setObsidianSyncMode('rest');
+                        if (apiAvailable === null) {
+                          checkObsidianApi();
+                        }
+                      }}
+                      className="px-3 py-2 rounded text-sm font-medium transition-all relative"
+                      style={{
+                        backgroundColor: obsidianSyncMode === 'rest' ? '#64c864' : '#2d2d2d',
+                        color: obsidianSyncMode === 'rest' ? '#1e1e1e' : '#e8e8e8',
+                        border: `1px solid ${obsidianSyncMode === 'rest' ? '#64c864' : 'rgba(100, 200, 100, 0.3)'}`,
+                      }}
+                    >
+                      REST API
+                      {apiAvailable === true && (
+                        <span className="absolute -top-1 -right-1 w-2 h-2 bg-green-500 rounded-full"></span>
+                      )}
+                    </button>
+                  </div>
+                  <p className="text-xs" style={{ color: '#888888' }}>
+                    {obsidianSyncMode === 'local' 
+                      ? '💡 本地開發：直接寫入 Obsidian vault 文件夾'
+                      : obsidianSyncMode === 'zip'
+                      ? '💡 部署環境：下載 ZIP 文件，解壓到 Obsidian vault'
+                      : '💡 自動同步：通過 Obsidian REST API 插件自動寫入（需安裝插件）'}
+                  </p>
                 </div>
-                
-                <button
-                  onClick={syncToObsidian}
-                  disabled={isSyncing || !graphData || !obsidianPath.trim()}
-                  className="w-full px-4 py-2 rounded-lg font-medium transition-all flex items-center justify-center gap-2 disabled:opacity-50 disabled:cursor-not-allowed"
-                  style={{
-                    background: isSyncing || !graphData || !obsidianPath.trim()
-                      ? '#252525'
-                      : 'linear-gradient(135deg, #64c864 0%, #4ade80 100%)',
-                    color: isSyncing || !graphData || !obsidianPath.trim() ? '#888888' : '#1e1e1e',
-                    borderRadius: '8px',
-                    border: isSyncing || !graphData || !obsidianPath.trim() 
-                      ? '1px solid rgba(100, 200, 100, 0.2)' 
-                      : 'none',
-                    fontFamily: '-apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif',
-                    cursor: isSyncing || !graphData || !obsidianPath.trim() ? 'not-allowed' : 'pointer',
-                    fontWeight: 600,
-                    boxShadow: isSyncing || !graphData || !obsidianPath.trim() 
-                      ? 'none' 
-                      : '0 2px 8px rgba(100, 200, 100, 0.3)'
-                  }}
-                  onMouseEnter={(e) => {
-                    if (!isSyncing && graphData && obsidianPath.trim()) {
-                      e.currentTarget.style.background = 'linear-gradient(135deg, #4ade80 0%, #22c55e 100%)';
-                      e.currentTarget.style.boxShadow = '0 4px 12px rgba(100, 200, 100, 0.4)';
-                    }
-                  }}
-                  onMouseLeave={(e) => {
-                    if (!isSyncing && graphData && obsidianPath.trim()) {
-                      e.currentTarget.style.background = 'linear-gradient(135deg, #64c864 0%, #4ade80 100%)';
-                      e.currentTarget.style.boxShadow = '0 2px 8px rgba(100, 200, 100, 0.3)';
-                    }
-                  }}
-                >
-                  {isSyncing ? (
-                    <>
-                      <svg className="animate-spin h-5 w-5" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" style={{ color: '#1e1e1e' }}>
-                        <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4" style={{ color: '#1e1e1e' }}></circle>
-                        <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z" style={{ color: '#1e1e1e' }}></path>
-                      </svg>
-                      <span>同步中...</span>
-                    </>
-                  ) : (
-                    <span>📁 同步到 Obsidian</span>
-                  )}
-                </button>
+
+                {/* REST API Configuration (only show for REST API mode) */}
+                {obsidianSyncMode === 'rest' && (
+                  <div className="space-y-2">
+                    <div className="p-3 rounded" style={{ backgroundColor: '#252525', border: '1px solid rgba(100, 200, 100, 0.2)' }}>
+                      <p className="text-xs font-medium mb-2" style={{ color: '#64c864' }}>
+                        📖 使用說明：
+                      </p>
+                      <ol className="text-xs space-y-1 list-decimal list-inside" style={{ color: '#b8b8b8' }}>
+                        <li>在 Obsidian 中安裝 "Local REST API" 插件</li>
+                        <li>打開插件設置，複製 API Key</li>
+                        <li>確保 Obsidian 正在運行</li>
+                        <li>在下方輸入 API Key 即可使用</li>
+                      </ol>
+                    </div>
+                    <div className="flex items-center gap-2">
+                      <input
+                        type="text"
+                        value={obsidianApiUrl}
+                        onChange={(e) => setObsidianApiUrl(e.target.value)}
+                        placeholder="API URL (default: http://127.0.0.1:27123)"
+                        className="form-input flex-1 text-sm focus:outline-none"
+                        style={{
+                          borderColor: 'rgba(100, 200, 100, 0.3)',
+                          backgroundColor: '#2d2d2d',
+                          color: '#e8e8e8',
+                          borderRadius: '8px',
+                          padding: '8px 12px'
+                        }}
+                      />
+                      <button
+                        type="button"
+                        onClick={checkObsidianApi}
+                        disabled={isCheckingApi}
+                        className="px-3 py-2 rounded text-sm font-medium transition-all"
+                        style={{
+                          backgroundColor: isCheckingApi ? '#252525' : '#64c864',
+                          color: isCheckingApi ? '#888888' : '#1e1e1e',
+                          border: '1px solid rgba(100, 200, 100, 0.3)',
+                          cursor: isCheckingApi ? 'not-allowed' : 'pointer',
+                        }}
+                      >
+                        {isCheckingApi ? '檢查中...' : '檢查'}
+                      </button>
+                    </div>
+                    {apiAvailable === true && (
+                      <p className="text-xs" style={{ color: '#64c864' }}>
+                        ✅ Obsidian REST API 可用
+                      </p>
+                    )}
+                    {apiAvailable === false && (
+                      <p className="text-xs" style={{ color: '#ff6b6b' }}>
+                        ❌ 無法連接到 Obsidian REST API。請確認：
+                        <br />1. 已安裝 Local REST API 插件
+                        <br />2. 插件已啟用並運行
+                        <br />3. API URL 正確
+                      </p>
+                    )}
+                    <input
+                      type="password"
+                      value={obsidianApiKey}
+                      onChange={(e) => saveApiKey(e.target.value)}
+                      placeholder="Obsidian REST API Key（從插件設置中複製）"
+                      className="form-input w-full text-sm focus:outline-none"
+                      style={{
+                        borderColor: 'rgba(100, 200, 100, 0.3)',
+                        backgroundColor: '#2d2d2d',
+                        color: '#e8e8e8',
+                        borderRadius: '8px',
+                        padding: '8px 12px'
+                      }}
+                    />
+                    <p className="text-xs" style={{ color: '#888888' }}>
+                      💡 API Key 會保存在瀏覽器中，無需每次輸入
+                    </p>
+                    <input
+                      type="text"
+                      value={obsidianSubfolder}
+                      onChange={(e) => setObsidianSubfolder(e.target.value)}
+                      placeholder="Subfolder name (optional)"
+                      className="form-input w-full text-sm focus:outline-none"
+                      style={{
+                        borderColor: 'rgba(100, 200, 100, 0.3)',
+                        backgroundColor: '#2d2d2d',
+                        color: '#e8e8e8',
+                        borderRadius: '8px',
+                        padding: '8px 12px'
+                      }}
+                    />
+                  </div>
+                )}
+
+                {/* ZIP Mode - Direct Download Button */}
+                {obsidianSyncMode === 'zip' && (
+                  <button
+                    onClick={syncToObsidian}
+                    disabled={isSyncing || !graphData}
+                    className="w-full px-4 py-2 rounded-lg font-medium transition-all flex items-center justify-center gap-2 disabled:opacity-50 disabled:cursor-not-allowed"
+                    style={{
+                      background: (isSyncing || !graphData)
+                        ? '#252525'
+                        : 'linear-gradient(135deg, #64c864 0%, #4ade80 100%)',
+                      color: (isSyncing || !graphData) ? '#888888' : '#1e1e1e',
+                      borderRadius: '8px',
+                      border: (isSyncing || !graphData)
+                        ? '1px solid rgba(100, 200, 100, 0.2)' 
+                        : 'none',
+                      fontFamily: '-apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif',
+                      cursor: (isSyncing || !graphData) ? 'not-allowed' : 'pointer',
+                      fontWeight: 600,
+                      boxShadow: (isSyncing || !graphData)
+                        ? 'none' 
+                        : '0 2px 8px rgba(100, 200, 100, 0.3)'
+                    }}
+                    onMouseEnter={(e) => {
+                      if (!isSyncing && graphData) {
+                        e.currentTarget.style.background = 'linear-gradient(135deg, #4ade80 0%, #22c55e 100%)';
+                        e.currentTarget.style.boxShadow = '0 4px 12px rgba(100, 200, 100, 0.4)';
+                      }
+                    }}
+                    onMouseLeave={(e) => {
+                      if (!isSyncing && graphData) {
+                        e.currentTarget.style.background = 'linear-gradient(135deg, #64c864 0%, #4ade80 100%)';
+                        e.currentTarget.style.boxShadow = '0 2px 8px rgba(100, 200, 100, 0.3)';
+                      }
+                    }}
+                  >
+                    {isSyncing ? (
+                      <>
+                        <svg className="animate-spin h-5 w-5" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" style={{ color: '#1e1e1e' }}>
+                          <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4" style={{ color: '#1e1e1e' }}></circle>
+                          <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z" style={{ color: '#1e1e1e' }}></path>
+                        </svg>
+                        <span>生成中...</span>
+                      </>
+                    ) : (
+                      <span>📁 下載 ZIP</span>
+                    )}
+                  </button>
+                )}
+
+                {/* Local Path Inputs (only show for local mode) */}
+                {obsidianSyncMode === 'local' && (
+                  <div className="space-y-2">
+                    <input
+                      type="text"
+                      value={obsidianPath}
+                      onChange={(e) => setObsidianPath(e.target.value)}
+                      placeholder="Obsidian vault path (e.g., C:\Users\YourName\Documents\MyVault)"
+                      className="form-input w-full text-sm focus:outline-none"
+                      style={{
+                        borderColor: 'rgba(100, 200, 100, 0.3)',
+                        backgroundColor: '#2d2d2d',
+                        color: '#e8e8e8',
+                        borderRadius: '8px',
+                        padding: '8px 12px'
+                      }}
+                    />
+                    <input
+                      type="text"
+                      value={obsidianSubfolder}
+                      onChange={(e) => setObsidianSubfolder(e.target.value)}
+                      placeholder="Subfolder name (optional)"
+                      className="form-input w-full text-sm focus:outline-none"
+                      style={{
+                        borderColor: 'rgba(100, 200, 100, 0.3)',
+                        backgroundColor: '#2d2d2d',
+                        color: '#e8e8e8',
+                        borderRadius: '8px',
+                        padding: '8px 12px'
+                      }}
+                    />
+                    <button
+                      onClick={syncToObsidian}
+                      disabled={isSyncing || !graphData || !obsidianPath.trim()}
+                      className="w-full px-4 py-2 rounded-lg font-medium transition-all flex items-center justify-center gap-2 disabled:opacity-50 disabled:cursor-not-allowed"
+                      style={{
+                        background: (isSyncing || !graphData || !obsidianPath.trim())
+                          ? '#252525'
+                          : 'linear-gradient(135deg, #64c864 0%, #4ade80 100%)',
+                        color: (isSyncing || !graphData || !obsidianPath.trim()) ? '#888888' : '#1e1e1e',
+                        borderRadius: '8px',
+                        border: (isSyncing || !graphData || !obsidianPath.trim())
+                          ? '1px solid rgba(100, 200, 100, 0.2)' 
+                          : 'none',
+                        fontFamily: '-apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif',
+                        cursor: (isSyncing || !graphData || !obsidianPath.trim()) ? 'not-allowed' : 'pointer',
+                        fontWeight: 600,
+                        boxShadow: (isSyncing || !graphData || !obsidianPath.trim())
+                          ? 'none' 
+                          : '0 2px 8px rgba(100, 200, 100, 0.3)'
+                      }}
+                      onMouseEnter={(e) => {
+                        if (!isSyncing && graphData && obsidianPath.trim()) {
+                          e.currentTarget.style.background = 'linear-gradient(135deg, #4ade80 0%, #22c55e 100%)';
+                          e.currentTarget.style.boxShadow = '0 4px 12px rgba(100, 200, 100, 0.4)';
+                        }
+                      }}
+                      onMouseLeave={(e) => {
+                        if (!isSyncing && graphData && obsidianPath.trim()) {
+                          e.currentTarget.style.background = 'linear-gradient(135deg, #64c864 0%, #4ade80 100%)';
+                          e.currentTarget.style.boxShadow = '0 2px 8px rgba(100, 200, 100, 0.3)';
+                        }
+                      }}
+                    >
+                      {isSyncing ? (
+                        <>
+                          <svg className="animate-spin h-5 w-5" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" style={{ color: '#1e1e1e' }}>
+                            <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4" style={{ color: '#1e1e1e' }}></circle>
+                            <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z" style={{ color: '#1e1e1e' }}></path>
+                          </svg>
+                          <span>同步中...</span>
+                        </>
+                      ) : (
+                        <span>📁 同步到 Obsidian</span>
+                      )}
+                    </button>
+                  </div>
+                )}
+
+                {/* REST API Sync Button (only show for REST API mode) */}
+                {obsidianSyncMode === 'rest' && (
+                  <button
+                    onClick={syncToObsidian}
+                    disabled={isSyncing || !graphData || !obsidianApiKey.trim()}
+                    className="w-full px-4 py-2 rounded-lg font-medium transition-all flex items-center justify-center gap-2 disabled:opacity-50 disabled:cursor-not-allowed"
+                    style={{
+                      background: (isSyncing || !graphData || !obsidianApiKey.trim())
+                        ? '#252525'
+                        : 'linear-gradient(135deg, #64c864 0%, #4ade80 100%)',
+                      color: (isSyncing || !graphData || !obsidianApiKey.trim()) ? '#888888' : '#1e1e1e',
+                      borderRadius: '8px',
+                      border: (isSyncing || !graphData || !obsidianApiKey.trim())
+                        ? '1px solid rgba(100, 200, 100, 0.2)' 
+                        : 'none',
+                      fontFamily: '-apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif',
+                      cursor: (isSyncing || !graphData || !obsidianApiKey.trim()) ? 'not-allowed' : 'pointer',
+                      fontWeight: 600,
+                      boxShadow: (isSyncing || !graphData || !obsidianApiKey.trim())
+                        ? 'none' 
+                        : '0 2px 8px rgba(100, 200, 100, 0.3)'
+                    }}
+                    onMouseEnter={(e) => {
+                      if (!isSyncing && graphData && obsidianApiKey.trim()) {
+                        e.currentTarget.style.background = 'linear-gradient(135deg, #4ade80 0%, #22c55e 100%)';
+                        e.currentTarget.style.boxShadow = '0 4px 12px rgba(100, 200, 100, 0.4)';
+                      }
+                    }}
+                    onMouseLeave={(e) => {
+                      if (!isSyncing && graphData && obsidianApiKey.trim()) {
+                        e.currentTarget.style.background = 'linear-gradient(135deg, #64c864 0%, #4ade80 100%)';
+                        e.currentTarget.style.boxShadow = '0 2px 8px rgba(100, 200, 100, 0.3)';
+                      }
+                    }}
+                  >
+                    {isSyncing ? (
+                      <>
+                        <svg className="animate-spin h-5 w-5" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" style={{ color: '#1e1e1e' }}>
+                          <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4" style={{ color: '#1e1e1e' }}></circle>
+                          <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z" style={{ color: '#1e1e1e' }}></path>
+                        </svg>
+                        <span>同步中...</span>
+                      </>
+                    ) : (
+                      <span>📁 同步到 Obsidian</span>
+                    )}
+                  </button>
+                )}
                 
                 {syncStatus && (
                   <div 
