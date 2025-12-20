@@ -27,6 +27,7 @@ import citationRoutes from './routes/citationRoutes';
 import authRoutes from './routes/authRoutes';
 import sessionRoutes from './routes/sessionRoutes';
 import analysisRoutes from './routes/analysisRoutes';
+import arxivRoutes from './routes/arxivRoutes';
 import { errorHandler } from './middleware/errorHandler';
 
 const app = express();
@@ -94,6 +95,7 @@ app.use('/api/citations', citationRoutes);
 app.use('/api/auth', authRoutes);
 app.use('/api/sessions', sessionRoutes);
 app.use('/api/analyses', analysisRoutes);
+app.use('/api/arxiv', arxivRoutes);
 
 // Health check - 必須在數據庫初始化之前可用
 app.get('/api/health', async (req, res) => {

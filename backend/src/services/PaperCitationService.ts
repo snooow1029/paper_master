@@ -181,10 +181,117 @@ export class PaperCitationService {
   }
 
   /**
-   * 根据论文 URL 获取 Prior Works
-   * 直接从 GROBID 提取，不依赖数据库
-   * 尝试从 Semantic Scholar 获取 citationCount
+   * Remove duplicate citations based on title, authors, and year
+   * Normalizes titles and author lists for comparison
    */
+  private removeDuplicateCitations(citations: PriorWork[]): PriorWork[] {
+    const normalizeTitle = (title: string): string => {
+      return title
+        .trim()
+        .toLowerCase()
+        .replace(/\s+/g, ' ') // Replace multiple spaces with single space
+        .replace(/[^\w\s]/g, '') // Remove punctuation for comparison
+        .trim();
+    };
+
+    const normalizeAuthors = (authors: string[]): string[] => {
+      return authors
+        .map(a => a.trim().toLowerCase())
+        .filter(a => a.length > 0)
+        .sort(); // Sort to handle different orders
+    };
+
+    const areAuthorsSimilar = (authors1: string[], authors2: string[]): boolean => {
+      const normalized1 = normalizeAuthors(authors1);
+      const normalized2 = normalizeAuthors(authors2);
+      
+      // If both have no authors, consider them similar
+      if (normalized1.length === 0 && normalized2.length === 0) {
+        return true;
+      }
+      
+      // If one has authors and the other doesn't, they're not similar
+      if (normalized1.length === 0 || normalized2.length === 0) {
+        return false;
+      }
+      
+      // Check if all authors match (exact match)
+      if (normalized1.length === normalized2.length && 
+          normalized1.every((a, i) => a === normalized2[i])) {
+        return true;
+      }
+      
+      // Check if they share at least 2 authors (for papers with many authors)
+      // Or if one list is a subset of the other (handles cases where one has fewer authors listed)
+      const commonAuthors = normalized1.filter(a => normalized2.includes(a));
+      const minLength = Math.min(normalized1.length, normalized2.length);
+      if (commonAuthors.length >= Math.min(2, minLength) || 
+          commonAuthors.length === minLength) {
+        return true;
+      }
+      
+      return false;
+    };
+
+    const isDuplicate = (c1: PriorWork, c2: PriorWork): boolean => {
+      // Compare normalized titles
+      const title1 = normalizeTitle(c1.title);
+      const title2 = normalizeTitle(c2.title);
+      
+      if (title1 !== title2) {
+        return false;
+      }
+      
+      // If titles match, compare years (if both have years, they must match)
+      if (c1.year && c2.year && c1.year !== c2.year) {
+        return false; // Different years, not a duplicate
+      }
+      
+      // Compare authors
+      return areAuthorsSimilar(c1.authors || [], c2.authors || []);
+    };
+
+    const uniqueCitations: PriorWork[] = [];
+    
+    for (const citation of citations) {
+      // Check if this citation is a duplicate of any already in uniqueCitations
+      let foundDuplicate = false;
+      let duplicateIndex = -1;
+      
+      for (let i = 0; i < uniqueCitations.length; i++) {
+        if (isDuplicate(citation, uniqueCitations[i])) {
+          foundDuplicate = true;
+          duplicateIndex = i;
+          break;
+        }
+      }
+      
+      if (foundDuplicate && duplicateIndex >= 0) {
+        // Compare and keep the one with more information
+        const existing = uniqueCitations[duplicateIndex];
+        const shouldReplace = 
+          (citation.authors.length > existing.authors.length) ||
+          (citation.url && !existing.url) ||
+          (citation.citationCount !== undefined && existing.citationCount !== undefined && citation.citationCount > existing.citationCount) ||
+          (citation.citationCount !== undefined && existing.citationCount === undefined);
+        
+        if (shouldReplace) {
+          uniqueCitations[duplicateIndex] = citation;
+          console.log(`🔄 Replacing duplicate citation "${citation.title.substring(0, 50)}..." with more complete version`);
+        } else {
+          console.log(`🔄 Skipping duplicate citation "${citation.title.substring(0, 50)}..."`);
+        }
+      } else {
+        // New unique citation
+        uniqueCitations.push(citation);
+      }
+    }
+    
+    console.log(`✅ Removed ${citations.length - uniqueCitations.length} duplicate citations (${uniqueCitations.length} unique remaining)`);
+    
+    return uniqueCitations;
+  }
+
   async getPriorWorksFromUrl(paperUrl: string): Promise<PriorWork[]> {
     try {
       const result = await this.grobidService.extractCitationsWithContextFiltered(paperUrl);
@@ -640,10 +747,13 @@ export class PaperCitationService {
       const withCitationCount = priorWorks.filter(w => w.citationCount > 0).length;
       console.log(`📊 Prior works summary: ${priorWorks.length} total (after dropping missing citationCount), ${withCitationCount} with citationCount > 0`);
       
+      // Remove duplicate citations based on title, authors, and year
+      const uniquePriorWorks = this.removeDuplicateCitations(priorWorks);
+      
       // 🚀 FIXED: Only return relevant papers (from Introduction/Related Work sections)
       // Filter to only include papers that were cited in relevant sections
       // Also prioritize papers with higher citationCount
-      const relevantPriorWorks = priorWorks.filter(work => {
+      const relevantPriorWorks = uniquePriorWorks.filter(work => {
         // Only include papers from Introduction/Related Work sections
         // If section is unknown, we'll keep it but prioritize those with known sections
         const section = work.section?.toLowerCase() || '';
@@ -672,7 +782,7 @@ export class PaperCitationService {
       const topPriorWorks = relevantPriorWorks.slice(0, 50);
       
       console.log(`📊 Filtered to ${topPriorWorks.length} relevant prior works (from Introduction/Related Work sections, sorted by citationCount)`);
-      console.log(`   Removed ${priorWorks.length - topPriorWorks.length} papers from other sections`);
+      console.log(`   Removed ${uniquePriorWorks.length - topPriorWorks.length} papers from other sections`);
       
       return topPriorWorks;
     } catch (error) {
