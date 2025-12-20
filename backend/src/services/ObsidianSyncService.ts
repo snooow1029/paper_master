@@ -1,5 +1,6 @@
 import fs from 'fs';
 import path from 'path';
+import archiver from 'archiver';
 
 interface GraphData {
   nodes: {
@@ -154,6 +155,18 @@ export class ObsidianSyncService {
     const authors = node.authors.length > 0 ? node.authors : ['Unknown'];
     const authorsYaml = authors.map(author => `  - "${author}"`).join('\n');
     
+    // Build outgoing links for Juggl
+    const outgoingLinks = outgoingEdges.map(edge => {
+      const targetNode = graphData.nodes.find(n => n.id === edge.target);
+      return targetNode?.title || 'Unknown';
+    });
+    
+    // Build incoming links for graph view
+    const incomingLinks = incomingEdges.map(edge => {
+      const sourceNode = graphData.nodes.find(n => n.id === edge.source);
+      return sourceNode?.title || 'Unknown';
+    });
+    
     return `---
 title: "${node.title}"
 year: ${node.year || 'Unknown'}
@@ -163,6 +176,8 @@ tags: [Paper, Research]
 cssclasses: [juggl-node-paper]
 url: "${node.url || ''}"
 abstract: "${(node.abstract || '').replace(/"/g, '\\"')}"
+outgoing:: [${outgoingLinks.map(title => `"${title}"`).join(', ')}]
+incoming:: [${incomingLinks.map(title => `"${title}"`).join(', ')}]
 ---
 
 # ${node.title}
@@ -281,11 +296,34 @@ ${graphData.edges.map(edge => {
   const sourceTitle = this.truncateTitle(sourceNode?.title || 'Unknown', 30);
   const targetTitle = this.truncateTitle(targetNode?.title || 'Unknown', 30);
   const relationshipLabel = edge.relationship || 'related';
-  return `    ${sourceLabel}["${sourceTitle}"] -->|${relationshipLabel}| ${targetLabel}["${targetTitle}"]`;
+  const strength = edge.strength || 0.5;
+  const edgeStyle = strength > 0.7 ? 'stroke-width:3px' : strength > 0.4 ? 'stroke-width:2px' : 'stroke-width:1px';
+  return `    ${sourceLabel}["${sourceTitle}"] -->|${relationshipLabel}| ${targetLabel}["${targetTitle}"]
+    style ${sourceLabel} fill:#64c864,stroke:#2d5016,stroke-width:2px
+    style ${targetLabel} fill:#64c864,stroke:#2d5016,stroke-width:2px`;
 }).join('\n')}
 
-classDef paper fill:#e1f5fe,stroke:#0277bd,stroke-width:2px
-classDef cited fill:#f3e5f5,stroke:#7b1fa2,stroke-width:2px
+classDef paper fill:#64c864,stroke:#2d5016,stroke-width:2px,color:#fff
+classDef cited fill:#7b68ee,stroke:#4b0082,stroke-width:2px,color:#fff
+\`\`\`
+
+### Obsidian Graph View
+> **Tip**: Open this note in Obsidian and use the built-in Graph View (Ctrl+G / Cmd+G) to see an interactive visualization of all paper relationships. The graph will automatically show connections based on the \`[[links]]\` in each paper file.
+
+### Juggl Interactive Graph
+\`\`\`juggl
+${graphData.nodes.map(node => {
+  const nodeId = this.sanitizeNodeId(node.title);
+  const outgoing = graphData.edges
+    .filter(e => e.source === node.id)
+    .map(e => {
+      const target = graphData.nodes.find(n => n.id === e.target);
+      return target ? this.sanitizeNodeId(target.title) : null;
+    })
+    .filter(Boolean)
+    .join(',');
+  return `  ${nodeId} -> {${outgoing}}`;
+}).filter(line => line.includes('->')).join('\n')}
 \`\`\`
 
 ## 📋 Relationship Details
@@ -311,9 +349,17 @@ ${graphData.edges.map((edge, index) => {
 
 ## 🎯 Juggl Configuration
 > **For Juggl Plugin**: 
+> - Install the [Juggl plugin](https://github.com/HEmile/juggl) from Obsidian Community Plugins
 > - Node styles are defined via \`cssclasses: [juggl-node-paper]\`
 > - Relationship types are stored in \`type::\` fields
 > - Strength values are available in \`strength::\` fields
+> - Use the Juggl code block above to render an interactive graph view
+> - Click on any paper node to see its details and relationships
+
+### How to View the Graph:
+1. **Obsidian Native Graph View**: Press \`Ctrl+G\` (Windows/Linux) or \`Cmd+G\` (Mac) to open the global graph view
+2. **Juggl Plugin**: Install Juggl from Community Plugins, then open this note to see the interactive graph
+3. **Mermaid Diagram**: The Mermaid diagram above renders automatically in Obsidian
 
 ## 📝 My Analysis Notes
 <!-- Add your manual analysis and insights here -->
@@ -352,5 +398,89 @@ ${graphData.edges.map((edge, index) => {
 
   getVaultPath(): string {
     return this.obsidianVaultPath;
+  }
+
+  /**
+   * Generate ZIP file with all Obsidian markdown files
+   * This is useful for deployment scenarios where direct file system access is not available
+   */
+  async generateZipFile(graphData: GraphData, graphName: string = 'Paper Graph'): Promise<{
+    success: boolean;
+    message: string;
+    zipBuffer?: Buffer;
+    fileName?: string;
+  }> {
+    return new Promise((resolve, reject) => {
+      try {
+        // Create a temporary directory structure in memory
+        const tempDir = path.join(process.cwd(), 'temp_obsidian_export');
+        const paperFolderPath = path.join(tempDir, this.paperFolderName);
+        const graphFolderPath = path.join(tempDir, this.graphFolderName);
+        
+        // Clean up temp dir if it exists
+        if (fs.existsSync(tempDir)) {
+          fs.rmSync(tempDir, { recursive: true, force: true });
+        }
+        
+        this.ensureDirectoryExists(paperFolderPath);
+        this.ensureDirectoryExists(graphFolderPath);
+
+        // Create individual paper files
+        for (const node of graphData.nodes) {
+          const paperContent = this.generatePaperMarkdown(node, graphData);
+          const safeFileName = this.generateSafeFileName(node.title);
+          const paperFilePath = path.join(paperFolderPath, `${safeFileName}.md`);
+          fs.writeFileSync(paperFilePath, paperContent, 'utf8');
+        }
+
+        // Create overview file
+        const timestamp = new Date().toISOString().split('T')[0];
+        const overviewContent = this.generateGraphOverview(graphData, graphName);
+        const safeGraphName = this.generateSafeFileName(graphName, 30);
+        const overviewFileName = `${safeGraphName}_${timestamp}.md`;
+        const overviewFilePath = path.join(graphFolderPath, overviewFileName);
+        fs.writeFileSync(overviewFilePath, overviewContent, 'utf8');
+
+        // Create ZIP file
+        const zipFileName = `${safeGraphName}_${timestamp}.zip`;
+        const output = fs.createWriteStream(path.join(tempDir, zipFileName));
+        const archive = archiver('zip', {
+          zlib: { level: 9 } // Maximum compression
+        });
+
+        output.on('close', () => {
+          const zipBuffer = fs.readFileSync(path.join(tempDir, zipFileName));
+          
+          // Clean up temp directory
+          fs.rmSync(tempDir, { recursive: true, force: true });
+          
+          resolve({
+            success: true,
+            message: `ZIP 文件生成成功: ${graphData.nodes.length} 篇論文, ${graphData.edges.length} 個關係`,
+            zipBuffer,
+            fileName: zipFileName
+          });
+        });
+
+        archive.on('error', (err) => {
+          // Clean up on error
+          if (fs.existsSync(tempDir)) {
+            fs.rmSync(tempDir, { recursive: true, force: true });
+          }
+          reject(err);
+        });
+
+        archive.pipe(output);
+        
+        // Add files to archive
+        archive.directory(paperFolderPath, this.paperFolderName);
+        archive.directory(graphFolderPath, this.graphFolderName);
+        
+        archive.finalize();
+      } catch (error) {
+        console.error('ZIP generation error:', error);
+        reject(error);
+      }
+    });
   }
 }

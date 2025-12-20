@@ -340,10 +340,13 @@ router.post('/build-with-filtered-citations', async (req, res) => {
 
 /**
  * 同步 graph 到 Obsidian
+ * 支持兩種模式：
+ * 1. 直接寫入本地路徑（開發環境）
+ * 2. 生成 ZIP 文件下載（部署環境）
  */
 router.post('/sync-to-obsidian', async (req, res) => {
   try {
-    const { graphData, graphName, vaultPath } = req.body;
+    const { graphData, graphName, vaultPath, exportMode = 'local' } = req.body;
     
     if (!graphData || !graphData.nodes || !graphData.edges) {
       return res.status(400).json({
@@ -352,15 +355,37 @@ router.post('/sync-to-obsidian', async (req, res) => {
       });
     }
 
-    // 如果提供了 vault 路徑，使用它
-    if (vaultPath) {
-      obsidianSync.setVaultPath(vaultPath);
-    }
-
     console.log(`\n=== Syncing Graph to Obsidian ===`);
     console.log(`Graph Name: ${graphName || 'Unnamed Graph'}`);
-    console.log(`Vault Path: ${obsidianSync.getVaultPath()}`);
+    console.log(`Export Mode: ${exportMode}`);
     console.log(`Papers: ${graphData.nodes.length}, Relationships: ${graphData.edges.length}`);
+
+    // ZIP 下載模式（部署環境）
+    if (exportMode === 'zip' || !vaultPath) {
+      const result = await obsidianSync.generateZipFile(
+        graphData,
+        graphName || `Paper Graph ${new Date().toISOString().split('T')[0]}`
+      );
+
+      if (result.success && result.zipBuffer) {
+        res.setHeader('Content-Type', 'application/zip');
+        res.setHeader('Content-Disposition', `attachment; filename="${result.fileName}"`);
+        res.setHeader('Content-Length', result.zipBuffer.length);
+        res.send(result.zipBuffer);
+        return;
+      } else {
+        return res.status(500).json({
+          success: false,
+          error: result.message || 'Failed to generate ZIP file'
+        });
+      }
+    }
+
+    // 本地路徑模式（開發環境）
+    if (vaultPath) {
+      obsidianSync.setVaultPath(vaultPath);
+      console.log(`Vault Path: ${obsidianSync.getVaultPath()}`);
+    }
 
     const result = await obsidianSync.syncGraphToObsidian(
       graphData, 
