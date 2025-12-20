@@ -37,7 +37,19 @@ export class ObsidianSyncService {
   }
 
   setVaultPath(vaultPath: string) {
-    this.obsidianVaultPath = vaultPath;
+    // Remove quotes and normalize path
+    let cleanPath = vaultPath.trim().replace(/^["']|["']$/g, '');
+    
+    // If path is absolute (starts with drive letter on Windows or / on Unix), use it directly
+    // Otherwise, treat as relative to current working directory
+    if (path.isAbsolute(cleanPath)) {
+      this.obsidianVaultPath = cleanPath;
+    } else {
+      // If relative path, resolve it relative to current working directory
+      this.obsidianVaultPath = path.resolve(process.cwd(), cleanPath);
+    }
+    
+    console.log(`Obsidian vault path set to: ${this.obsidianVaultPath}`);
   }
 
   private ensureDirectoryExists(dirPath: string): void {

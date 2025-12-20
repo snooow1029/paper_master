@@ -173,6 +173,8 @@ const PaperGraphPage: React.FC<PaperGraphPageProps> = ({ setSessionHandler }) =>
   const [showObsidianSync, setShowObsidianSync] = useState(false);
   const [obsidianPath, setObsidianPath] = useState('');
   const [obsidianSubfolder, setObsidianSubfolder] = useState('');
+  const [isSyncing, setIsSyncing] = useState(false);
+  const [syncStatus, setSyncStatus] = useState<string | null>(null);
 
   // 这些状态变量已不再使用（功能已移到顶部标签页）
   // 保留用于向后兼容，可以稍后删除
@@ -1636,7 +1638,98 @@ const PaperGraphPage: React.FC<PaperGraphPageProps> = ({ setSessionHandler }) =>
     }
   }, [citationFormat, rawCitations]);
 
-  // TODO: Obsidian sync functionality can be added later if needed
+  // Obsidian sync functionality
+  const syncToObsidian = async () => {
+    if (!graphData) {
+      setSyncStatus('❌ 沒有圖數據可同步');
+      setTimeout(() => setSyncStatus(null), 3000);
+      return;
+    }
+
+    if (!obsidianPath.trim()) {
+      setSyncStatus('❌ 請輸入 Obsidian vault 路徑');
+      setTimeout(() => setSyncStatus(null), 3000);
+      return;
+    }
+
+    setIsSyncing(true);
+    setSyncStatus('正在同步到 Obsidian...');
+
+    try {
+      // Convert frontend GraphData format to backend expected format
+      const backendGraphData = {
+        nodes: graphData.nodes.map((node) => ({
+          id: node.id,
+          title: node.title || node.label || node.id,
+          authors: node.authors || [],
+          abstract: node.abstract || '',
+          introduction: node.introduction || '',
+          url: node.url || '',
+          tags: node.tags || [],
+          year: node.year,
+          venue: node.venue,
+          conference: node.conference,
+          citationCount: node.citationCount || node.paperCitationCount,
+          doi: node.doi,
+          arxivId: node.arxivId,
+        })),
+        edges: graphData.edges.map((edge) => {
+          // Handle both string IDs and node objects (from D3)
+          const sourceId = typeof edge.source === 'string' ? edge.source : edge.source.id;
+          const targetId = typeof edge.target === 'string' ? edge.target : edge.target.id;
+          
+          return {
+            source: sourceId,
+            target: targetId,
+            relationship: edge.relationship || '',
+            strength: edge.strength || 1,
+            evidence: edge.evidence || '',
+            description: edge.description || edge.relationship || '',
+          };
+        }),
+      };
+
+      // Build vault path with subfolder if provided
+      // Remove quotes and trim whitespace
+      let finalVaultPath = obsidianPath.trim().replace(/^["']|["']$/g, '');
+      if (obsidianSubfolder.trim()) {
+        const subfolder = obsidianSubfolder.trim().replace(/^["']|["']$/g, '');
+        finalVaultPath = `${finalVaultPath}/${subfolder}`;
+      }
+
+      const token = localStorage.getItem('authToken');
+      const headers: HeadersInit = {
+        'Content-Type': 'application/json',
+      };
+      if (token) {
+        headers['Authorization'] = `Bearer ${token}`;
+      }
+
+      const response = await fetch(`${API_BASE_URL}/api/graph/sync-to-obsidian`, {
+        method: 'POST',
+        headers,
+        body: JSON.stringify({
+          graphData: backendGraphData,
+          graphName: `Paper Graph ${new Date().toLocaleDateString()}`,
+          vaultPath: finalVaultPath,
+        }),
+      });
+
+      const result = await response.json();
+
+      if (result.success) {
+        setSyncStatus(`✅ ${result.message}`);
+      } else {
+        setSyncStatus(`❌ 同步失敗: ${result.error || result.message || '未知錯誤'}`);
+      }
+    } catch (error) {
+      console.error('Obsidian sync error:', error);
+      setSyncStatus(`❌ 同步失敗: ${error instanceof Error ? error.message : '未知錯誤'}`);
+    } finally {
+      setIsSyncing(false);
+      setTimeout(() => setSyncStatus(null), 5000);
+    }
+  };
 
   return (
     <div className="h-screen flex flex-col overflow-hidden" style={{ backgroundColor: '#1e1e1e' }}>
@@ -1857,7 +1950,7 @@ const PaperGraphPage: React.FC<PaperGraphPageProps> = ({ setSessionHandler }) =>
                     type="text"
                     value={obsidianPath}
                     onChange={(e) => setObsidianPath(e.target.value)}
-                    placeholder="Obsidian vault path"
+                    placeholder="Obsidian vault path (e.g., C:\Users\YourName\Documents\MyVault)"
                     className="form-input w-full text-sm focus:outline-none"
                     style={{
                       borderColor: 'rgba(100, 200, 100, 0.3)',
@@ -1882,6 +1975,67 @@ const PaperGraphPage: React.FC<PaperGraphPageProps> = ({ setSessionHandler }) =>
                     }}
                   />
                 </div>
+                
+                <button
+                  onClick={syncToObsidian}
+                  disabled={isSyncing || !graphData || !obsidianPath.trim()}
+                  className="w-full px-4 py-2 rounded-lg font-medium transition-all flex items-center justify-center gap-2 disabled:opacity-50 disabled:cursor-not-allowed"
+                  style={{
+                    background: isSyncing || !graphData || !obsidianPath.trim()
+                      ? '#252525'
+                      : 'linear-gradient(135deg, #64c864 0%, #4ade80 100%)',
+                    color: isSyncing || !graphData || !obsidianPath.trim() ? '#888888' : '#1e1e1e',
+                    borderRadius: '8px',
+                    border: isSyncing || !graphData || !obsidianPath.trim() 
+                      ? '1px solid rgba(100, 200, 100, 0.2)' 
+                      : 'none',
+                    fontFamily: '-apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif',
+                    cursor: isSyncing || !graphData || !obsidianPath.trim() ? 'not-allowed' : 'pointer',
+                    fontWeight: 600,
+                    boxShadow: isSyncing || !graphData || !obsidianPath.trim() 
+                      ? 'none' 
+                      : '0 2px 8px rgba(100, 200, 100, 0.3)'
+                  }}
+                  onMouseEnter={(e) => {
+                    if (!isSyncing && graphData && obsidianPath.trim()) {
+                      e.currentTarget.style.background = 'linear-gradient(135deg, #4ade80 0%, #22c55e 100%)';
+                      e.currentTarget.style.boxShadow = '0 4px 12px rgba(100, 200, 100, 0.4)';
+                    }
+                  }}
+                  onMouseLeave={(e) => {
+                    if (!isSyncing && graphData && obsidianPath.trim()) {
+                      e.currentTarget.style.background = 'linear-gradient(135deg, #64c864 0%, #4ade80 100%)';
+                      e.currentTarget.style.boxShadow = '0 2px 8px rgba(100, 200, 100, 0.3)';
+                    }
+                  }}
+                >
+                  {isSyncing ? (
+                    <>
+                      <svg className="animate-spin h-5 w-5" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" style={{ color: '#1e1e1e' }}>
+                        <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4" style={{ color: '#1e1e1e' }}></circle>
+                        <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z" style={{ color: '#1e1e1e' }}></path>
+                      </svg>
+                      <span>同步中...</span>
+                    </>
+                  ) : (
+                    <span>📁 同步到 Obsidian</span>
+                  )}
+                </button>
+                
+                {syncStatus && (
+                  <div 
+                    className="text-sm p-2 rounded"
+                    style={{
+                      backgroundColor: syncStatus.includes('✅') 
+                        ? 'rgba(100, 200, 100, 0.2)' 
+                        : 'rgba(239, 68, 68, 0.2)',
+                      color: syncStatus.includes('✅') ? '#64c864' : '#ef4444',
+                      border: `1px solid ${syncStatus.includes('✅') ? 'rgba(100, 200, 100, 0.3)' : 'rgba(239, 68, 68, 0.3)'}`,
+                    }}
+                  >
+                    {syncStatus}
+                  </div>
+                )}
               </div>
             )}
           </div>
