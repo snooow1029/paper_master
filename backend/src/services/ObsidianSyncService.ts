@@ -208,9 +208,15 @@ ${outgoingEdges.length > 0 ? outgoingEdges.map(edge => {
 ${incomingEdges.length > 0 ? incomingEdges.map(edge => {
   const sourceNode = graphData.nodes.find(n => n.id === edge.source);
   const sanitizedTitle = sourceNode?.title || 'Unknown';
+  const relationshipType = edge.relationship || 'references';
+  const context = edge.evidence || 'Context not available';
+  const explanation = edge.description || 'Relationship explanation not available';
   
   return `- **[[${sanitizedTitle}]]**
-  - (關係的詳細定義在引用方的文件中)`;
+  - type:: \`${relationshipType}\`
+  - strength:: ${edge.strength || 0.5}
+  - context:: "${context.replace(/"/g, '\\"')}"
+  - explanation:: "${explanation.replace(/"/g, '\\"')}"`;
 }).join('\n') : '- No incoming citations found'}
 
 ---
