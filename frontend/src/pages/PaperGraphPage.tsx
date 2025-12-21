@@ -2,6 +2,7 @@ import React, { useState, useEffect, useRef, useCallback } from 'react';
 import GraphVisualization from '../components/GraphVisualization';
 import AnalysisProgress from '../components/AnalysisProgress';
 import ResizableSidebar from '../components/ResizableSidebar';
+import ArxivSearch from '../components/ArxivSearch';
 import { GraphData } from '../types/graph';
 import { isAuthenticated } from '../utils/auth';
 import { useLoadSession } from '../hooks/useLoadSession';
@@ -29,6 +30,7 @@ import {
   AddCircleOutline as AddCircleOutlineIcon,
   Settings as SettingsIcon,
   FileCopy as CopyIcon,
+  Search as SearchIcon,
 } from '@mui/icons-material';
 
 // Use relative path if VITE_API_BASE_URL is not set (development proxy)
@@ -78,7 +80,7 @@ const PaperGraphPage: React.FC<PaperGraphPageProps> = ({ setSessionHandler }) =>
   const [_originalPaperUrls, setOriginalPaperUrls] = useState<string[]>([]);
   
   // 多模式切换状态（类似 Connected Papers）
-  type ViewMode = 'graph' | 'prior-works' | 'derivative-works' | 'citation-extractor';
+  type ViewMode = 'graph' | 'prior-works' | 'derivative-works' | 'citation-extractor' | 'arxiv-search';
   const [viewMode, setViewMode] = useState<ViewMode>('graph');
   
   // Prior Works 和 Derivative Works 数据（从分析结果中获取）
@@ -2996,6 +2998,30 @@ ${graphData.edges.map((edge: any, index: number) => {
                 <DescriptionIcon className="w-4 h-4 mr-2 inline" style={{ verticalAlign: 'middle' }} /> 
                 Citation Extractor
               </button>
+              <button
+                onClick={() => setViewMode('arxiv-search')}
+                className="px-6 py-3 text-sm font-semibold transition-all duration-200 relative"
+                style={{
+                  backgroundColor: viewMode === 'arxiv-search' ? 'transparent' : 'transparent',
+                  color: viewMode === 'arxiv-search' ? '#64c864' : '#b8b8b8',
+                  borderBottom: viewMode === 'arxiv-search' ? '2px solid #64c864' : '2px solid transparent',
+                  fontFamily: '-apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif',
+                  fontWeight: viewMode === 'arxiv-search' ? 600 : 500,
+                }}
+                onMouseEnter={(e) => {
+                  if (viewMode !== 'arxiv-search') {
+                    e.currentTarget.style.color = '#e8e8e8';
+                  }
+                }}
+                onMouseLeave={(e) => {
+                  if (viewMode !== 'arxiv-search') {
+                    e.currentTarget.style.color = '#b8b8b8';
+                  }
+                }}
+              >
+                <SearchIcon className="w-4 h-4 mr-2 inline" style={{ verticalAlign: 'middle', fontSize: '16px' }} /> 
+                arXiv Search
+              </button>
             </div>
 
               {/* Right side: Guide button */}
@@ -3760,6 +3786,12 @@ ${graphData.edges.map((edge: any, index: number) => {
                   )}
                 </div>
               )}
+          
+          {viewMode === 'arxiv-search' && (
+            <div className="h-full overflow-y-auto" style={{ backgroundColor: '#1e1e1e' }}>
+              <ArxivSearch />
+            </div>
+          )}
           
           {viewMode === 'citation-extractor' && (
             <div className="h-full overflow-y-auto p-6" style={{ backgroundColor: '#1e1e1e' }}>
