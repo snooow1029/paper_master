@@ -1877,7 +1877,15 @@ ${outgoingEdges.length > 0 ? outgoingEdges.map((edge: any) => {
   const targetId = typeof edge.target === 'string' ? edge.target : (edge.target?.id || edge.target);
   const targetNode = graphData.nodes.find((n: any) => n.id === targetId);
   const targetTitle = targetNode?.title || targetNode?.label || 'Unknown';
-  return `- **[[${targetTitle}]]**`;
+  const relationshipType = edge.relationship || 'references';
+  const context = edge.evidence || 'Context not available';
+  const explanation = edge.description || 'Relationship explanation not available';
+  
+  return `- **[[${targetTitle}]]**
+  - type:: \`${relationshipType}\`
+  - strength:: ${edge.strength || 0.5}
+  - context:: "${context.replace(/"/g, '\\"')}"
+  - explanation:: "${explanation.replace(/"/g, '\\"')}"`;
 }).join('\n') : '- No outgoing citations found'}
 
 ### Cited By (Incoming Links)
@@ -1885,7 +1893,15 @@ ${incomingEdges.length > 0 ? incomingEdges.map((edge: any) => {
   const sourceId = typeof edge.source === 'string' ? edge.source : (edge.source?.id || edge.source);
   const sourceNode = graphData.nodes.find((n: any) => n.id === sourceId);
   const sourceTitle = sourceNode?.title || sourceNode?.label || 'Unknown';
-  return `- **[[${sourceTitle}]]**`;
+  const relationshipType = edge.relationship || 'references';
+  const context = edge.evidence || 'Context not available';
+  const explanation = edge.description || 'Relationship explanation not available';
+  
+  return `- **[[${sourceTitle}]]**
+  - type:: \`${relationshipType}\`
+  - strength:: ${edge.strength || 0.5}
+  - context:: "${context.replace(/"/g, '\\"')}"
+  - explanation:: "${explanation.replace(/"/g, '\\"')}"`;
 }).join('\n') : '- No incoming citations found'}
 
 ---
