@@ -421,6 +421,143 @@ export class AdvancedCitationService {
   /**
    * Extract citations with context from a paper
    */
+  /**
+   * Remove duplicate citations based on title, authors, and year
+   * Normalizes titles and author lists for comparison
+   */
+  private removeDuplicateCitationsByContent(citations: Array<{
+    id: string;
+    title?: string;
+    authors?: string[];
+    year?: string;
+    context: string;
+    contextBefore: string;
+    contextAfter: string;
+    section?: string;
+  }>): Array<{
+    id: string;
+    title?: string;
+    authors?: string[];
+    year?: string;
+    context: string;
+    contextBefore: string;
+    contextAfter: string;
+    section?: string;
+  }> {
+    const normalizeTitle = (title: string | undefined): string => {
+      if (!title) return '';
+      return title
+        .trim()
+        .toLowerCase()
+        .replace(/\s+/g, ' ') // Replace multiple spaces with single space
+        .replace(/[^\w\s]/g, '') // Remove punctuation for comparison
+        .trim();
+    };
+
+    const normalizeAuthors = (authors: string[] | undefined): string[] => {
+      if (!authors || authors.length === 0) return [];
+      return authors
+        .map(a => a.trim().toLowerCase())
+        .filter(a => a.length > 0)
+        .sort(); // Sort to handle different orders
+    };
+
+    const areAuthorsSimilar = (authors1: string[] | undefined, authors2: string[] | undefined): boolean => {
+      const normalized1 = normalizeAuthors(authors1);
+      const normalized2 = normalizeAuthors(authors2);
+      
+      // If both have no authors, consider them similar
+      if (normalized1.length === 0 && normalized2.length === 0) {
+        return true;
+      }
+      
+      // If one has authors and the other doesn't, they're not similar
+      if (normalized1.length === 0 || normalized2.length === 0) {
+        return false;
+      }
+      
+      // Check if all authors match (exact match)
+      if (normalized1.length === normalized2.length && 
+          normalized1.every((a, i) => a === normalized2[i])) {
+        return true;
+      }
+      
+      // Check if they share at least 2 authors (for papers with many authors)
+      // Or if one list is a subset of the other (handles cases where one has fewer authors listed)
+      const commonAuthors = normalized1.filter(a => normalized2.includes(a));
+      const minLength = Math.min(normalized1.length, normalized2.length);
+      if (commonAuthors.length >= Math.min(2, minLength) || 
+          commonAuthors.length === minLength) {
+        return true;
+      }
+      
+      return false;
+    };
+
+    const isDuplicate = (c1: typeof citations[0], c2: typeof citations[0]): boolean => {
+      // Compare normalized titles
+      const title1 = normalizeTitle(c1.title);
+      const title2 = normalizeTitle(c2.title);
+      
+      // If both titles are empty, skip title comparison
+      if (title1 === '' && title2 === '') {
+        // If both have no title, we can't reliably compare, skip
+        return false;
+      }
+      
+      if (title1 !== title2) {
+        return false;
+      }
+      
+      // If titles match, compare years (if both have years, they must match)
+      if (c1.year && c2.year && c1.year !== c2.year) {
+        return false; // Different years, not a duplicate
+      }
+      
+      // Compare authors
+      return areAuthorsSimilar(c1.authors, c2.authors);
+    };
+
+    const uniqueCitations: typeof citations = [];
+    
+    for (const citation of citations) {
+      // Check if this citation is a duplicate of any already in uniqueCitations
+      let foundDuplicate = false;
+      let duplicateIndex = -1;
+      
+      for (let i = 0; i < uniqueCitations.length; i++) {
+        if (isDuplicate(citation, uniqueCitations[i])) {
+          foundDuplicate = true;
+          duplicateIndex = i;
+          break;
+        }
+      }
+      
+      if (foundDuplicate && duplicateIndex >= 0) {
+        // Compare and keep the one with more information
+        const existing = uniqueCitations[duplicateIndex];
+        const shouldReplace = 
+          (citation.authors && citation.authors.length > 0 && (!existing.authors || citation.authors.length > existing.authors.length)) ||
+          (citation.year && !existing.year) ||
+          (citation.context && citation.context.length > (existing.context?.length || 0));
+        
+        if (shouldReplace) {
+          uniqueCitations[duplicateIndex] = citation;
+          console.log(`🔄 Replacing duplicate citation "${citation.title?.substring(0, 50) || citation.id}..." with more complete version`);
+        } else {
+          console.log(`🔄 Skipping duplicate citation "${citation.title?.substring(0, 50) || citation.id}..."`);
+        }
+      } else {
+        // New unique citation
+        uniqueCitations.push(citation);
+      }
+    }
+    
+    console.log(`✅ Removed ${citations.length - uniqueCitations.length} duplicate citations (${uniqueCitations.length} unique remaining)`);
+    
+    return uniqueCitations;
+  }
+
   async extractCitationsWithContext(arxivUrl: string): Promise<{
     success: boolean;
     paperTitle?: string;
@@ -562,10 +699,13 @@ export class AdvancedCitationService {
 
       console.log(`Extracted ${citations.length} citations with context`);
 
+      // Remove duplicates based on title, authors, and year
+      const uniqueCitations = this.removeDuplicateCitationsByContent(citations);
+
       return {
         success: true,
         paperTitle,
-        citations
+        citations: uniqueCitations
       };
 
     } catch (error) {
@@ -1453,10 +1593,8 @@ export class AdvancedCitationService {
         console.log(`📋 Extracted ${citations.length} citations via fallback method`);
       }
 
-      // Remove duplicates based on citation ID
-      const uniqueCitations = citations.filter((citation, index, self) => 
-        index === self.findIndex(c => c.id === citation.id)
-      );    
+      // Remove duplicates based on title, authors, and year (not just ID)
+      const uniqueCitations = this.removeDuplicateCitationsByContent(citations);    
 
       return {
         success: true,

@@ -4,99 +4,403 @@ An interactive academic paper visualization tool similar to Connected Papers, en
 
 ## Project Overview
 
-Paper Master is designed to help researchers visualize and understand the relationships between academic papers by automatically extracting citation networks and generating intelligent summaries of how papers connect to each other. The tool combines web with AI to create an interactive knowledge graph that grows with each analysis.
+Paper Master enables researchers to:
+
+- **Visualize citation networks** — Build interactive graphs showing relationships between papers
+- **Extract citations intelligently** — Use GROBID to parse PDFs and extract structured citation data
+- **Analyze relationships** — Leverage LLMs to understand how papers connect and relate to each other
+- **Search arXiv papers** — Integrated arXiv search with relevance ranking
+- **Manage sessions** — Save and restore analysis sessions with persistent graph data
 
 ### Key Features
 
-- **Multi-paper input** — Primary support for arXiv URLs. Other sources (DOI, publisher pages, local PDFs) are supported but may have reduced parsing fidelity depending on source metadata.
-- **Selectable Analysis Depth** — Choose between a quick 1-level analysis (~3-5 mins) or a deep 2-level analysis (~15-20 mins) to control processing time.
-- **Smart Section Filtering** — Focus analysis on specific sections like "Introduction" and "Related Work" for more relevant and targeted insights.
-- **Intelligent relationship analysis** — Automatic extraction and analysis of citation and semantic relationships between papers. Edges are labeled and supplemented with confidence metadata produced via LLM-assisted parsing.
-- **Interactive visualization** — Zoomable, draggable graph visualization (vis-network / D3) with node/edge selection, contextual detail panels, and client-side editing tools.
-- **Real-time updates & curation** — Immediate UI updates for edits and deletions, plus backend hooks for longer-running analysis jobs.
+- **Multi-paper input** — Primary support for arXiv URLs with fallback to other sources (DOI, publisher pages)
+- **Selectable Analysis Depth** — Choose between quick 1-level (~3-5 mins) or deep 2-level analysis (~15-20 mins)
+- **Smart Section Filtering** — Focus analysis on specific sections (Introduction, Related Work, etc.)
+- **Intelligent relationship analysis** — AI-powered extraction of citation and semantic relationships
+- **Interactive visualization** — D3.js-based force-directed graph with node/edge editing
+- **Prior Works & Derivative Works** — Analyze papers that influenced or were influenced by your input
+- **Citation Extractor** — Extract and format citations from PDFs with deduplication
+- **arXiv Search** — Search arXiv papers with intelligent relevance ranking
 
-## Demo
+## Table of Contents
 
-[![Watch Demo](https://img.youtube.com/vi/kAYbg1XUcUw/maxresdefault.jpg)](https://youtu.be/kAYbg1XUcUw)
+- [Project Overview](#project-overview)
+- [Prerequisites](#prerequisites)
+- [Installation](#installation)
+- [Configuration](#configuration)
+- [Running the Application](#running-the-application)
+- [Project Structure](#project-structure)
+- [Current Status](#current-status-v01-functional-prototype)
+- [Development Roadmap](#development-roadmap)
+- [Technical Architecture](#technical-architecture)
+- [Contributing](#contributing)
+- [License](#license)
+- [Acknowledgments](#acknowledgments)
+- [Contact](#contact)
 
-## Quick Start
+## Prerequisites
 
-This project uses a monorepo-like structure with a root `package.json` to manage both the frontend and backend.
+### Required
 
-### Prerequisites
+- **Node.js** >= 16.x (recommended: 18.x or 20.x)
+- **npm** >= 8.x or **yarn** >= 1.22.x
+- **Java** >= 11 (for GROBID)
+- **Git**
 
-- Node.js (>=16)
-- npm or yarn
-- Java (for GROBID)
-- Git
+### Optional (for Local LLM Mode)
 
-### Installation
+- **Ollama** — For running local LLMs ([Installation Guide](https://ollama.ai))
+- **Python** >= 3.9 — For LiteLLM bridge
+- **LiteLLM** — Install with `pip install litellm`
 
-1. **Clone the repository:**
+### Optional (for Production)
 
-   ```bash
+- **PostgreSQL** >= 12.x — For production database (SQLite is used by default)
+
+## Installation
+
+### 1. Clone the Repository
+
+```bash
    git clone https://github.com/snooow1029/paper_master.git
    cd paper_master
-   ```
-2. **Install all dependencies:**
-   This command will install dependencies for the root, frontend, and backend packages.
+```
 
-   ```bash
+### 2. Install Dependencies
+
+Install dependencies for root, frontend, and backend:
+
+```bash
    npm run install:all
-   ```
+```
 
-### Running the Development Servers
+This command will:
 
-This project requires three separate processes to run concurrently: the GROBID server, the backend API, and the frontend web app.
+- Install root-level dependencies (concurrently)
+- Install frontend dependencies (React, Vite, D3.js, etc.)
+- Install backend dependencies (Express, TypeORM, etc.)
 
-1. **Start GROBID (Terminal 1)**
+### 3. Download and Setup GROBID
 
-   GROBID is used to extract structured metadata from PDFs. See the [GROBID documentation](https://grobid.readthedocs.io/en/latest/Introduction/) for more details.
+GROBID is required for PDF parsing and citation extraction.
 
-   ```bash
-   # Download and run GROBID (only needs to be done once)
-   wget https://github.com/kermitt2/grobid/archive/0.8.2.zip
-   unzip 0.8.2.zip
+**Option A: Download and Extract (Recommended)**
+
+```bash
+# Download GROBID 0.8.2
+wget https://github.com/kermitt2/grobid/archive/0.8.2.zip
+unzip 0.8.2.zip
+
+# Or use curl on macOS
+curl -L -o grobid-0.8.2.zip https://github.com/kermitt2/grobid/archive/0.8.2.zip
+unzip grobid-0.8.2.zip
+```
+
+**Option B: Use Docker (Alternative)**
+
+```bash
+docker run --rm -d -p 8070:8070 lfoppiano/grobid:0.8.2
+```
+
+**Option C: Clone from GitHub**
+
+```bash
+git clone --branch 0.8.2 --depth 1 https://github.com/kermitt2/grobid.git grobid-0.8.2
+cd grobid-0.8.2
+chmod +x gradlew
+```
+
+The GROBID directory should be located at `./grobid-0.8.2` in the project root.
+
+## Configuration
+
+### Environment Variables
+
+The backend requires a `.env` file for configuration. A template is provided as `.env.example`.
+
+#### 1. Copy the Example File
+
+```bash
+cp backend/.env.example backend/.env
+```
+
+#### 2. Configure Environment Variables
+
+Edit `backend/.env` with your settings:
+
+```bash
+# Server Configuration
+PORT=5001                    # Backend server port (default: 5001 or 8080)
+
+# LLM Provider Configuration
+# Options: 'local', 'gemini', 'openai', 'disabled'
+LLM_TYPE=local               # Use 'local' for Ollama, 'gemini' for Google Gemini, 'disabled' to skip LLM features
+
+# Local LLM Configuration (when LLM_TYPE=local)
+LOCAL_LLM_URL=http://localhost:8000
+LOCAL_LLM_MODEL=ollama/qwen2.5:3b-instruct
+
+# Gemini API Configuration (when LLM_TYPE=gemini)
+GEMINI_API_KEY=your_gemini_api_key_here
+
+# OpenAI API Configuration (when LLM_TYPE=openai)
+OPENAI_API_KEY=your_openai_api_key_here
+
+# Database Configuration
+# For SQLite (default, no configuration needed):
+# Leave DATABASE_URL empty or unset
+
+# For PostgreSQL (production):
+DATABASE_URL=postgresql://user:password@localhost:5432/paper_master
+DB_SSL=false                  # Set to 'true' for SSL connections
+
+# GROBID Service
+GROBID_URL=http://localhost:8070
+
+# OAuth Configuration (Optional, for Google OAuth login)
+GOOGLE_CLIENT_ID=your_google_client_id
+GOOGLE_CLIENT_SECRET=your_google_client_secret
+GOOGLE_CALLBACK_URL=http://localhost:5001/api/auth/google/callback
+
+# JWT Secret (for authentication)
+JWT_SECRET=your_jwt_secret_key_here
+
+# Frontend URL (for CORS)
+FRONTEND_URL=http://localhost:3000
+```
+
+### Environment Variable Reference
+
+| Variable                 | Required | Default                        | Description                                                     |
+| ------------------------ | -------- | ------------------------------ | --------------------------------------------------------------- |
+| `PORT`                 | No       | `5001`                       | Backend server port                                             |
+| `LLM_TYPE`             | No       | `disabled`                   | LLM provider:`local`, `gemini`, `openai`, or `disabled` |
+| `LOCAL_LLM_URL`        | Yes*     | `http://localhost:8000`      | LiteLLM bridge URL (required if `LLM_TYPE=local`)             |
+| `LOCAL_LLM_MODEL`      | Yes*     | `ollama/qwen2.5:3b-instruct` | Model identifier (required if `LLM_TYPE=local`)               |
+| `GEMINI_API_KEY`       | Yes*     | -                              | Google Gemini API key (required if `LLM_TYPE=gemini`)         |
+| `OPENAI_API_KEY`       | Yes*     | -                              | OpenAI API key (required if `LLM_TYPE=openai`)                |
+| `DATABASE_URL`         | No       | -                              | PostgreSQL connection string (uses SQLite if not set)           |
+| `DB_SSL`               | No       | `false`                      | Enable SSL for PostgreSQL                                       |
+| `GROBID_URL`           | No       | `http://localhost:8070`      | GROBID service URL                                              |
+| `GOOGLE_CLIENT_ID`     | No       | -                              | Google OAuth client ID                                          |
+| `GOOGLE_CLIENT_SECRET` | No       | -                              | Google OAuth client secret                                      |
+| `JWT_SECRET`           | No       | -                              | Secret key for JWT tokens                                       |
+| `FRONTEND_URL`         | No       | `http://localhost:3000`      | Frontend URL for CORS                                           |
+
+\* Required based on `LLM_TYPE` selection
+
+### Frontend Environment Variables
+
+The frontend uses Vite environment variables. Create `frontend/.env` if needed:
+
+```bash
+# Frontend API Base URL (optional, uses proxy in development)
+VITE_API_BASE_URL=http://localhost:5001
+```
+
+**Note:** In development mode, the frontend uses a Vite proxy (configured in `vite.config.ts`) to forward `/api/*` requests to the backend. You typically don't need to set `VITE_API_BASE_URL` in development.
+
+## Running the Application
+
+### Method 1: One-Command Startup (macOS/Linux) — Recommended
+
+The `run.sh` script automatically starts all required services:
+
+```bash
+./run.sh
+```
+
+This script will:
+
+1. Load environment variables from `backend/.env`
+2. Start Ollama (if `LLM_TYPE=local`)
+3. Start LiteLLM bridge (if `LLM_TYPE=local`)
+4. Start GROBID server
+5. Install dependencies if needed
+6. Start backend and frontend servers
+
+**Customizing LLM Type:**
+
+```bash
+# Use local LLM (Ollama + LiteLLM)
+LLM_TYPE=local ./run.sh
+
+# Use Gemini API
+LLM_TYPE=gemini ./run.sh
+
+# Disable LLM features
+LLM_TYPE=disabled ./run.sh
+```
+
+**Note:** Make sure `run.sh` is executable:
+
+```bash
+chmod +x run.sh
+```
+
+### Method 2: Manual Startup (All Platforms)
+
+#### Step 1: Start GROBID
+
+**Terminal 1 — GROBID:**
+
+```bash
    cd grobid-0.8.2
    chmod +x gradlew
    ./gradlew run
-   ```
+```
 
-   By default, GROBID listens on `http://localhost:8070`.
-2. **Configure and Start the Backend & Frontend (Terminal 2)**
+GROBID will start on `http://localhost:8070`. Wait until you see:
 
-   First, set up your environment variables by copying the example file:
+```
+INFO:     Started server process
+INFO:     Uvicorn running on http://127.0.0.1:8070
+```
 
-   ```bash
-   cp backend/.env.example backend/.env
-   ```
+**Verification:**
 
-   Next, edit `backend/.env` to add your `OPENAI_API_KEY` or specify a local `VLLM_URL`.
-   (Currently, only local VLLM is supported, and the OpenAI API requires fixing.)
+```bash
+curl http://localhost:8070/api/isalive
+# Should return: true
+```
 
-   Finally, run the development script from the root directory. This will start both the backend and frontend servers concurrently.
+#### Step 2: Start Local LLM Services (if using `LLM_TYPE=local`)
 
-   ```bash
+**Terminal 2 — Ollama:**
+
+```bash
+ollama serve
+```
+
+**Terminal 3 — LiteLLM Bridge:**
+
+```bash
+litellm --model ollama/qwen2.5:3b-instruct --api_base http://127.0.0.1:11435 --host 127.0.0.1 --port 8000
+```
+
+**Note:** Make sure you have a model installed in Ollama:
+
+```bash
+ollama pull qwen2.5:3b-instruct
+```
+
+#### Step 3: Start Backend and Frontend
+
+**Option A: Concurrent Start (Recommended)**
+
+**Terminal 4 — Both Services:**
+
+```bash
    npm run dev
+```
+
+This starts both backend and frontend concurrently.
+
+**Option B: Separate Terminals**
+
+**Terminal 4 — Backend:**
+
+```bash
+cd backend
+npm run dev
+```
+
+**Terminal 5 — Frontend:**
+
+```bash
+cd frontend
+npm run dev
+```
+
+### Method 3: Windows PowerShell Scripts
+
+**Terminal 1 — Backend:**
+
+```powershell
+.\start-backend.ps1
+```
+
+**Terminal 2 — Frontend:**
+
+```powershell
+.\start-frontend.ps1
+```
+
+**Note:** You still need to start GROBID separately (see Step 1 above).
+
+### Verification
+
+Once all services are running:
+
+1. **Backend Health Check:**
+
+   ```bash
+   curl http://localhost:5001/api/health
+   ```
+2. **Frontend:**
+   Open your browser to `http://localhost:3000`
+3. **GROBID:**
+
+   ```bash
+   curl http://localhost:8070/api/isalive
    ```
 
-   - The **backend** will run on the port specified in `.env` (default: `5000`).
-   - The **frontend** will run on `http://localhost:3000`.
+## Project Structure
 
-### Quick Verification
-
-1. Ensure GROBID is running.
-2. Run `npm run dev` from the root directory.
-3. Open your browser to `http://localhost:3000`.
-4. Submit an arXiv URL and confirm that the analysis pipeline completes successfully.
+```
+paper_master/
+├── backend/                 # Backend API (Express + TypeORM)
+│   ├── src/
+│   │   ├── config/          # Database, Passport configuration
+│   │   ├── controllers/     # Request handlers
+│   │   ├── entities/        # TypeORM entities
+│   │   ├── middleware/      # Express middleware
+│   │   ├── routes/          # API routes
+│   │   ├── services/        # Business logic
+│   │   └── utils/           # Utility functions
+│   ├── .env.example         # Environment variable template
+│   └── package.json
+├── frontend/                # Frontend (React + Vite)
+│   ├── src/
+│   │   ├── components/      # React components
+│   │   ├── pages/           # Page components
+│   │   ├── services/        # API clients
+│   │   ├── types/           # TypeScript types
+│   │   └── utils/           # Utility functions
+│   └── package.json
+├── shared/                  # Shared types and utilities
+│   ├── types/               # Shared TypeScript types
+│   └── utils/               # Shared utilities
+├── grobid-0.8.2/            # GROBID installation (gitignored)
+├── run.sh                   # One-command startup script
+├── start-backend.ps1        # Windows backend startup
+├── start-frontend.ps1       # Windows frontend startup
+└── package.json             # Root package.json
+```
 
 ## Current Status (v0.1 — Functional Prototype)
 
-- **Input:** Supports single or multiple paper URL submission.
-- **Processing:** Synchronous fetching and analysis of up to two levels of connected papers.
-- **Core analysis:** Uses an LLM to generate descriptive text for edges based on in-text citations.
-- **Output:** Renders a temporary graph visualization in the web UI.
-- **Persistence:** Basic SQLite storage with TypeORM integration (results are currently limited in lifecycle).
+### Implemented Features
+
+- **Input:** Supports single or multiple paper URL submission with primary support for arXiv URLs
+- **Processing:** Asynchronous task processing with progress tracking and real-time updates via Server-Sent Events (SSE)
+- **Core Analysis:** Uses LLM (local/Ollama, Gemini, or OpenAI) to generate descriptive text for edges based on in-text citations
+- **Graph Visualization:** Interactive D3.js-based force-directed graph with node/edge editing, selection, and persistent highlighting
+- **Citation Extraction:** GROBID-powered citation extraction with deduplication and section filtering
+- **Prior Works & Derivative Works:** Analyze papers that influenced or were influenced by input papers with citation count enrichment
+- **arXiv Search:** Integrated arXiv API search with intelligent relevance ranking and query normalization
+- **Session Management:** Save and restore analysis sessions with persistent graph data (SQLite/PostgreSQL)
+- **Obsidian Integration:** Export knowledge graphs to Obsidian vaults with Juggl/Dataview-compatible Markdown format
+- **OAuth Authentication:** Google OAuth login support for user accounts
+- **Database:** SQLite (default) and PostgreSQL support with TypeORM automatic schema synchronization
+
+### Current Limitations
+
+- Task queue is in-memory (not persisted across server restarts)
+- No graph database integration (Neo4j) for advanced graph analytics
+- Synchronous processing still used for some operations (citation extraction)
+- Limited scalability for large-scale analysis jobs
 
 ## Development Roadmap
 
@@ -104,21 +408,28 @@ This project requires three separate processes to run concurrently: the GROBID s
 
 Objective: Transition from a prototype to a robust, scalable application.
 
-- [ ] 1.1 Implement asynchronous task processing (e.g., Celery/Redis or a Node.js task queue) to avoid long HTTP request times.
+- [x] 1.1 Implement asynchronous task processing (e.g., Celery/Redis or a Node.js task queue) to avoid long HTTP request times.
+  - Status: Completed (basic in-memory task queue with SSE progress updates implemented)
+  - Future work: Persistent task queue with Redis/BullMQ for production scalability
 - [ ] 1.2 Integrate a persistent graph database (e.g., Neo4j) for cumulative knowledge storage.
-- [ ] 1.3 Upgrade UI/UX and input capabilities (multiple URL inputs, PDF uploads, progress feedback).
+- [x] 1.3 Upgrade UI/UX and input capabilities (multiple URL inputs, PDF uploads, progress feedback).
+  - Completed: Multiple URL inputs supported, progress feedback via SSE implemented
+  - Partial: PDF uploads (GROBID supports PDF processing via URL)
 
 ### Phase 2 — Core Features & Interactivity
 
 Objective: Build interactive curation and integration features.
 
-- [ ] 2.1 Implement "Second Brain" integration (Obsidian sync with Juggl/Dataview-compatible Markdown).
+- [x] 2.1 Implement "Second Brain" integration (Obsidian sync with Juggl/Dataview-compatible Markdown).
+  - Status: Completed (ObsidianSyncService implemented with Markdown export and Juggl/Dataview-compatible format support)
 
 ### Phase 3 — Advanced Features & Platformization
 
 Objective: Evolve into a multi-user research platform.
 
-- [ ] 3.1 User accounts and multi-tenancy.
+- [x] 3.1 User accounts and multi-tenancy.
+  - Completed: Google OAuth authentication implemented, session-based user management
+  - In progress: Full multi-tenancy isolation
 - [ ] 3.2 Advanced graph analytics (PageRank, centrality, shortest-paths, community detection).
 - [ ] 3.3 Intelligent recommendation system based on users' knowledge graphs.
 
@@ -151,3 +462,18 @@ If you'd like to contribute, please open an issue or submit a pull request. For 
 ## License
 
 This project is licensed under the MIT License. See the [LICENSE](LICENSE) file for details.
+
+## Acknowledgments
+
+- [GROBID](https://github.com/kermitt2/grobid) — PDF parsing and citation extraction
+- [D3.js](https://d3js.org/) — Graph visualization
+- [TypeORM](https://typeorm.io/) — Database ORM
+- [Ollama](https://ollama.ai/) — Local LLM runtime
+- [LiteLLM](https://github.com/BerriAI/litellm) — LLM proxy
+
+## Contact
+
+- **GitHub:** [snooow1029/paper_master](https://github.com/snooow1029/paper_master)
+- **Issues:** [GitHub Issues](https://github.com/snooow1029/paper_master/issues)
+
+---
