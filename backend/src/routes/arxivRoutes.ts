@@ -32,9 +32,9 @@ router.post('/search', async (req, res) => {
       ? maxResults
       : 10; // Default to 10, max 50
 
-    // If query is already a constructed query string (contains +AND+ or field prefixes), use it directly
-    // Otherwise, let the service handle query construction
-    const searchQuery = query || 'all:*';
+    // If query is already a constructed query string (contains +AND+ or field prefixes), use it directly.
+    // Do not override an empty query when filters are provided; rely on the service to interpret it.
+    const searchQuery = typeof query === 'string' ? query.trim() : '';
 
     console.log(`\n=== Arxiv Search Request ===`);
     console.log(`Query: ${searchQuery}`);
