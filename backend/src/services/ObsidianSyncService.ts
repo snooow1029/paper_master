@@ -462,7 +462,7 @@ ${graphData.edges.map((edge, index) => {
           });
         });
 
-        archive.on('error', (err) => {
+        archive.on('error', (err: Error) => {
           // Clean up on error
           if (fs.existsSync(tempDir)) {
             fs.rmSync(tempDir, { recursive: true, force: true });
