@@ -4,13 +4,18 @@ An interactive academic paper visualization tool similar to Connected Papers, en
 
 ## Project Overview
 
+Paper Master is a comprehensive academic paper visualization and analysis platform that helps researchers understand the relationships between academic papers through interactive knowledge graphs. It combines automated citation extraction, AI-powered relationship analysis, and seamless integration with knowledge management tools.
+
+### Core Capabilities
+
 Paper Master enables researchers to:
 
-- **Visualize citation networks** — Build interactive graphs showing relationships between papers
-- **Extract citations intelligently** — Use GROBID to parse PDFs and extract structured citation data
-- **Analyze relationships** — Leverage LLMs to understand how papers connect and relate to each other
-- **Search arXiv papers** — Integrated arXiv search with relevance ranking
-- **Manage sessions** — Save and restore analysis sessions with persistent graph data
+- **Visualize citation networks** — Build interactive, editable graphs showing relationships between papers with D3.js-based force-directed visualization
+- **Extract citations intelligently** — Use GROBID to parse PDFs and extract structured citation data with deduplication and section filtering
+- **Analyze relationships** — Leverage LLMs (local/Ollama, Gemini, or OpenAI) to understand how papers connect and relate to each other with detailed edge metadata
+- **Search arXiv papers** — Integrated arXiv API search with intelligent relevance ranking and query normalization
+- **Manage sessions** — Save and restore analysis sessions with persistent graph data (SQLite/PostgreSQL)
+- **Export to Obsidian** — Seamlessly sync knowledge graphs to Obsidian vaults with complete edge information, supporting multiple export modes (local path, ZIP download, REST API)
 
 ### Key Features
 
@@ -22,6 +27,7 @@ Paper Master enables researchers to:
 - **Prior Works & Derivative Works** — Analyze papers that influenced or were influenced by your input
 - **Citation Extractor** — Extract and format citations from PDFs with deduplication
 - **arXiv Search** — Search arXiv papers with intelligent relevance ranking
+- **Obsidian Integration** — Export knowledge graphs to Obsidian with complete edge information, supporting local path, ZIP download, and REST API sync modes
 
 ## Table of Contents
 
@@ -30,6 +36,7 @@ Paper Master enables researchers to:
 - [Installation](#installation)
 - [Configuration](#configuration)
 - [Running the Application](#running-the-application)
+- [Obsidian Integration](#obsidian-integration)
 - [Project Structure](#project-structure)
 - [Current Status](#current-status-v01-functional-prototype)
 - [Development Roadmap](#development-roadmap)
@@ -346,37 +353,88 @@ Once all services are running:
    curl http://localhost:8070/api/isalive
    ```
 
+## Obsidian Integration
+
+Paper Master supports seamless integration with [Obsidian](https://obsidian.md/), allowing you to export knowledge graphs directly into your Obsidian vault. Exported files include complete edge information (relationship type, strength, context, explanation) and are compatible with Obsidian's native graph view and plugins like [Juggl](https://github.com/HEmile/juggl) and [Dataview](https://github.com/MichaelAquilina/zettelkasten).
+
+### Export Modes
+
+Three sync modes are available:
+
+1. **Local Path** — Direct file system access (development)
+   - Enter your Obsidian vault path and optional subfolder
+   - Files are written directly to `Papers/` and `Paper_Graphs/` folders
+
+2. **ZIP Download** — For production deployments
+   - Downloads a ZIP file with the same folder structure
+   - Extract to your Obsidian vault root directory
+
+3. **REST API** — Automatic sync via [Local REST API](https://github.com/coddingtonbear/obsidian-local-rest-api) plugin
+   - Requires Obsidian running with the plugin installed
+   - Enter API URL (default: `http://127.0.0.1:27123`) and API key
+   - Files are automatically written to your vault
+
+### File Format
+
+Each exported paper file includes:
+- **Frontmatter**: Title, authors, year, venue, arXiv ID, DOI, tags
+- **Content**: Abstract, introduction, citation links with complete edge metadata
+- **Links**: Uses Obsidian's `[[wikilinks]]` format for automatic graph connections
+
+### Usage Tips
+
+- **Graph View**: Open Obsidian's graph view (`Ctrl+G` / `Cmd+G`) to see paper relationships
+- **Juggl Plugin**: Install for interactive graph visualization
+- **Dataview**: Query papers using Dataview syntax (e.g., `TABLE authors, year FROM "Papers"`)
+- **Subfolders**: Use optional subfolders to organize papers by project or topic
+- **Updates**: Re-syncing overwrites existing files, allowing incremental updates
+
+### Troubleshooting
+
+- **REST API 404**: Ensure Obsidian is running and the Local REST API plugin is enabled
+- **Files not appearing**: Check vault path (Local/ZIP) or Obsidian console (REST API)
+- **Graph not showing connections**: Verify `[[wikilinks]]` are present and refresh Obsidian
+
 ## Project Structure
 
 ```
 paper_master/
-├── backend/                 # Backend API (Express + TypeORM)
+├── backend/
 │   ├── src/
-│   │   ├── config/          # Database, Passport configuration
-│   │   ├── controllers/     # Request handlers
-│   │   ├── entities/        # TypeORM entities
-│   │   ├── middleware/      # Express middleware
-│   │   ├── routes/          # API routes
-│   │   ├── services/        # Business logic
-│   │   └── utils/           # Utility functions
-│   ├── .env.example         # Environment variable template
+│   │   ├── config/
+│   │   ├── controllers/
+│   │   ├── entities/
+│   │   ├── middleware/
+│   │   ├── routes/
+│   │   ├── services/
+│   │   ├── utils/
+│   │   └── index.ts
+│   ├── .env.example
 │   └── package.json
-├── frontend/                # Frontend (React + Vite)
+├── frontend/
 │   ├── src/
-│   │   ├── components/      # React components
-│   │   ├── pages/           # Page components
-│   │   ├── services/        # API clients
-│   │   ├── types/           # TypeScript types
-│   │   └── utils/           # Utility functions
+│   │   ├── components/
+│   │   ├── pages/
+│   │   ├── services/
+│   │   ├── hooks/
+│   │   ├── types/
+│   │   ├── utils/
+│   │   ├── styles/
+│   │   ├── App.tsx
+│   │   └── main.tsx
+│   ├── public/
 │   └── package.json
-├── shared/                  # Shared types and utilities
-│   ├── types/               # Shared TypeScript types
-│   └── utils/               # Shared utilities
-├── grobid-0.8.2/            # GROBID installation (gitignored)
-├── run.sh                   # One-command startup script
-├── start-backend.ps1        # Windows backend startup
-├── start-frontend.ps1       # Windows frontend startup
-└── package.json             # Root package.json
+├── shared/
+│   ├── types/
+│   └── utils/
+├── grobid-0.8.2/
+├── package.json
+├── run.sh
+├── start-backend.ps1
+├── start-frontend.ps1
+├── vercel.json
+├── railway.json
+└── nixpacks.toml
 ```
 
 ## Current Status (v0.1 — Functional Prototype)
