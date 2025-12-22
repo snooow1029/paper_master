@@ -201,20 +201,45 @@ export default function ArxivSearch() {
     }
     
     // 10. Summary contains query keywords (lower weight, but still relevant)
-    const summaryWords = summaryLower.split(/\s+/).filter(w => w.length >= 2);
-    const summaryMatches = queryWords.filter(w => summaryWords.includes(w)).length;
-    if (summaryMatches > 0) {
-      score += (summaryMatches / queryWords.length) * 200;
-    }
+    score += calculateSummaryMatchScore(summaryLower, queryWords);
     
     // 11. Penalize very long titles (shorter titles might be more precise)
     // But only if we don't have a very high score already
-    if (score < 3000) {
-      const titleLengthPenalty = Math.max(0, (titleWords.length - queryWords.length * 3) * 5);
-      score -= titleLengthPenalty;
-    }
+    score = applyTitleLengthPenalty(score, titleWords.length, queryWords.length);
     
     return score;
+  };
+
+  /**
+   * Calculate additional relevance score based on summary keyword matches.
+   * Lower weight than title matches, but still contributes to overall relevance.
+   */
+  const calculateSummaryMatchScore = (summaryLower: string, queryWords: string[]): number => {
+    const summaryWords = summaryLower.split(/\s+/).filter(w => w.length >= 2);
+    const summaryMatches = queryWords.filter(w => summaryWords.includes(w)).length;
+
+    if (summaryMatches > 0) {
+      return (summaryMatches / queryWords.length) * 200;
+    }
+
+    return 0;
+  };
+
+  /**
+   * Apply a penalty to the relevance score for very long titles.
+   * Shorter titles might be more precise, but avoid penalizing highly relevant results.
+   */
+  const applyTitleLengthPenalty = (
+    currentScore: number,
+    titleWordCount: number,
+    queryWordCount: number
+  ): number => {
+    if (currentScore < 3000) {
+      const titleLengthPenalty = Math.max(0, (titleWordCount - queryWordCount * 3) * 5);
+      return currentScore - titleLengthPenalty;
+    }
+
+    return currentScore;
   };
 
   /**
