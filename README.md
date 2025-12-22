@@ -6,6 +6,14 @@ An interactive academic paper visualization tool similar to Connected Papers, en
 
 Paper Master is a comprehensive academic paper visualization and analysis platform that helps researchers understand the relationships between academic papers through interactive knowledge graphs. It combines automated citation extraction, AI-powered relationship analysis, and seamless integration with knowledge management tools.
 
+**Live Demo:** [https://paper-master.vercel.app/](https://paper-master.vercel.app/)
+
+![Project Overview](asset/overview.png)
+
+> **Note:** The backend server is typically not running on the demo site. For full functionality including paper analysis and graph generation, you'll need to deploy and run the backend server locally or on your own infrastructure. See the [Installation](#installation) and [Running the Application](#running-the-application) sections for setup instructions.
+>
+> **Questions or Issues?** Contact [Jia-Kai Dong](https://www.facebook.com/dong.jia.kai) on Facebook.
+
 ### Core Capabilities
 
 Paper Master enables researchers to:
